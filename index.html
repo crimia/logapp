@@ -151,14 +151,20 @@
            padding:3px 6px;cursor:pointer;border-radius:3px}
   .hidebtn:hover{color:#a33;background:var(--paper)}
 
-  /* 항목 편집 (길게 누르기) */
-  .txt{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-  .row.holding{background:var(--paper);border-radius:3px}
-  .edit{display:flex;gap:6px;align-items:center;margin:5px 0 6px 24px}
+  /* 항목 편집 (⋯ 버튼) */
+  .editb{font-size:13px;letter-spacing:.5px}
+  .editwrap{margin:5px 0 7px 24px}
+  .edit{display:flex;gap:6px;align-items:center}
   .edit input{flex:1;min-width:0;font:inherit;font-size:13.5px;padding:5px 8px;
               border:1px solid var(--ink);border-radius:3px;background:var(--surface);color:var(--ink)}
   .edit .save{font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer;
               border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
+  .editbar{display:flex;gap:6px;align-items:center;margin-top:5px}
+  .editbar .spacer{flex:1}
+  .movebtn{font:inherit;font-size:11.5px;color:var(--ink);background:var(--surface);
+           border:1px solid var(--rule);border-radius:3px;padding:4px 8px;cursor:pointer}
+  .movebtn:hover:not(:disabled){border-color:var(--ink)}
+  .movebtn:disabled{opacity:.35;cursor:default}
   .delbtn{font:inherit;font-size:11px;color:var(--muted);background:none;
           border:1px solid var(--rule);border-radius:3px;padding:4px 6px;cursor:pointer}
   .delbtn:hover{color:#fff;background:#a33;border-color:#a33}
@@ -250,14 +256,16 @@ async function ghWrite(path, text, sha, msg){
 }
 
 /* ═══ 상태 ═══════════════════════════════════════════ */
-const TODAY = new Date().toISOString().slice(0,10);
+const pad  = n => String(n).padStart(2,"0");
+// toISOString()은 UTC다. 한국은 자정부터 아침 9시까지 어제가 나온다.
+const localDate = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+let TODAY = localDate();
 const S = {
   view:"date", ym:TODAY.slice(0,7), date:TODAY, topic:null,
   topics:[], store:{}, present:new Set(),
   raw:new Set(), open:null, status:"", err:false, loading:true,
-  exportOpen:false, topicsOpen:false, topicMsg:"",
+  exportOpen:false, topicsOpen:false, topicMsg:"", focusEdit:false,
 };
-const pad  = n => String(n).padStart(2,"0");
 const DOW  = ["일","월","화","수","목","금","토"];
 const dow  = d => DOW[new Date(d+"T00:00:00").getDay()];
 const nfc  = s => s.normalize("NFC");
@@ -346,8 +354,17 @@ const isItem   = l => /^- \[[ xX]\]/.test(l || "");
 const itemText = l => { const m = (l || "").match(/^- \[[ xX]\]\s?(.*)$/); return m ? m[1] : null; };
 // 항목에 딸린 실행 코멘트의 끝(다음 줄 번호)
 const cmtEnd = (L, ln) => { let at = ln + 1; while (at < L.length && /^\s{2,}- /.test(L[at])) at++; return at; };
+const isCmt = l => /^\s{2,}- /.test(l || "");
 // 큐에 쌓인 연산이 뒤늦게 다른 텍스트에 닿을 수 있다. 그 줄이 그대로일 때만 손댄다.
 const same = (L, ln, prev) => prev == null || itemText(L[ln]) === prev;
+// 같은 내용의 항목이 어느 줄로 갔는지. 순서를 바꾼 뒤 편집창을 따라가게 하는 데 쓴다.
+function findItemLine(text, s, hint){
+  const L = text.split("\n");
+  let best = -1;
+  for (let i = 0; i < L.length; i++)
+    if (isItem(L[i]) && itemText(L[i]) === s && (best < 0 || Math.abs(i-hint) < Math.abs(best-hint))) best = i;
+  return best;
+}
 
 function applyOp(o, text){
   const L = text.split("\n");
@@ -377,6 +394,27 @@ function applyOp(o, text){
       if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
       L.splice(o.ln, cmtEnd(L, o.ln) - o.ln);
       return L.join("\n");
+
+    case "move": {                                           // 항목을 딸린 코멘트째 이웃과 맞바꾼다
+      if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
+      const end = cmtEnd(L, o.ln), block = L.slice(o.ln, end);
+      if (o.dir < 0){
+        let q = o.ln - 1;
+        while (q >= 0 && !L[q].trim()) q--;                  // 사이의 빈 줄은 건너뛴다
+        while (q >= 0 && isCmt(L[q])) q--;                   // 앞 항목에 딸린 코멘트
+        if (q < 0 || !isItem(L[q])) return text;             // 소제목·본문은 넘지 않는다
+        L.splice(o.ln, block.length);
+        L.splice(q, 0, ...block);
+      } else {
+        let q = end;
+        while (q < L.length && !L[q].trim()) q++;
+        if (q >= L.length || !isItem(L[q])) return text;
+        const qEnd = cmtEnd(L, q);
+        L.splice(o.ln, block.length);
+        L.splice(qEnd - block.length, 0, ...block);
+      }
+      return L.join("\n");
+    }
 
     case "add": {
       let at = L.length;
@@ -545,59 +583,53 @@ function inputRow(ph, done){
   return w;
 }
 
-// 항목 편집 줄. 삭제는 여기 안에 작게 둔다.
-function editRow(initial, onSave, onDel){
-  const w = el("div","edit");
+// 항목 편집창. 수정·순서·삭제가 여기 모인다.
+function editRow(initial, on){
+  const w = el("div","editwrap");
+  const r1 = el("div","edit");
   const i = el("input"); i.value = initial; i.setAttribute("aria-label","계획 수정");
   const b = el("button","save"); b.textContent = "저장";
-  const x = el("button","delbtn"); x.textContent = "삭제"; x.title = "코멘트까지 지웁니다";
   const go = () => {
     const v = i.value.trim();
-    if (v && v !== initial) onSave(v);
+    if (v && v !== initial) on.save(v);
     else { S.open = null; render(); }
   };
   b.onclick = go;
-  x.onclick = onDel;                                   // 확인창 없이
   i.onkeydown = e => { if (e.key==="Enter") go(); if (e.key==="Escape"){ S.open=null; render(); } };
-  w.append(i,b,x);
-  setTimeout(() => { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 0);
+  r1.append(i,b);
+
+  const r2 = el("div","editbar");
+  const up = el("button","movebtn"); up.textContent = "↑ 위로";   up.disabled = !on.canUp;   up.onclick = () => on.move(-1);
+  const dn = el("button","movebtn"); dn.textContent = "↓ 아래로"; dn.disabled = !on.canDown; dn.onclick = () => on.move(1);
+  const x  = el("button","delbtn");  x.textContent = "삭제"; x.title = "코멘트까지 지웁니다";
+  x.onclick = on.del;                                  // 확인창 없이
+  r2.append(up, dn, el("span","spacer"), x);
+
+  w.append(r1, r2);
+  // 열 때만 포커스를 준다. 순서를 바꿀 때마다 키보드가 올라오면 성가시다.
+  if (S.focusEdit){
+    S.focusEdit = false;
+    setTimeout(() => { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 0);
+  }
   return w;
 }
 
-// 길게 눌러 편집창을 연 뒤, 손을 뗄 때 따라오는 탭 한 번만 삼킨다.
-// 그게 없으면 방금 연 입력칸이 곧바로 포커스를 잃는다. 해제 함수를 돌려준다.
-function swallowTrailingTap(){
-  const evs = ["mousedown","mouseup","click"];
-  const eat = ev => {
-    ev.preventDefault(); ev.stopPropagation();
-    if (ev.type === "click") off();                    // 탭 한 묶음을 삼켰으면 거기서 끝
-    else if (ev.type === "mouseup") setTimeout(off, 60);   // click이 안 따라오는 경우까지
-  };
-  const off = () => { clearTimeout(guard); for (const t of evs) document.removeEventListener(t, eat, true); };
-  for (const t of evs) document.addEventListener(t, eat, true);
-  const guard = setTimeout(off, 5000);                 // 아무것도 안 오는 경우의 안전장치
-  return off;
-}
-
-// 길게 누르기. 버튼 위에서는 무시한다.
-// 손을 떼기 전에 화면을 다시 그리므로, 떼는 신호는 떨어져 나간 이 노드로 온다.
-function attachHold(node, fire){
-  let timer = null, sx = 0, sy = 0, disarm = null;
-  const clear = () => { clearTimeout(timer); timer = null; node.classList.remove("holding"); };
+// 좌우로 밀면 날짜를 넘긴다. 세로 스크롤과 겹치지 않게 가로가 확실할 때만.
+function attachSwipe(node, go){
+  let x0 = 0, y0 = 0, t0 = 0, on = false;
   node.addEventListener("pointerdown", e => {
-    if (e.target.closest("button")) return;
-    sx = e.clientX; sy = e.clientY;
-    node.classList.add("holding");
-    timer = setTimeout(() => { clear(); disarm = swallowTrailingTap(); fire(); }, 480);
+    on = !e.target.closest(".grid-scroll, input, textarea, button, pre");
+    x0 = e.clientX; y0 = e.clientY; t0 = Date.now();
   });
-  node.addEventListener("pointermove", e => {
-    if (timer && (Math.abs(e.clientX-sx) > 8 || Math.abs(e.clientY-sy) > 8)) clear();
+  node.addEventListener("pointerup", e => {
+    if (!on) return;
+    on = false;
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (Date.now() - t0 > 700) return;                       // 느긋한 동작은 스와이프가 아니다
+    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+    go(dx < 0 ? 1 : -1);                                     // 왼쪽으로 밀면 다음 날
   });
-  const end = () => {
-    clear();
-    if (disarm){ const d = disarm; disarm = null; setTimeout(d, 80); }
-  };
-  for (const t of ["pointerup","pointercancel","pointerleave"]) node.addEventListener(t, end);
+  node.addEventListener("pointercancel", () => { on = false; });
 }
 
 function card(d,t){
@@ -652,13 +684,19 @@ function card(d,t){
     box.setAttribute("aria-pressed", b.done);
     box.onclick = () => mutate(path, {k:"toggle", ln:b.ln, prev:b.text}, `${b.done?"uncheck":"check"} ${d} ${t}`);
 
-    const tx = el("div","txt"); tx.textContent = b.text; tx.title = "길게 눌러 수정";
+    const tx = el("div","txt"); tx.textContent = b.text;
     const ac = el("button","addc"); ac.textContent = "+"; ac.title = "실행 코멘트";
     ac.onclick = () => { S.open = path+"::"+b.ln; render(); };
-    row.append(box, tx, ac); li.appendChild(row);
-
     const ekey = path+"::edit::"+b.ln;
-    attachHold(row, () => { S.open = S.open === ekey ? null : ekey; render(); });
+    const eb = el("button","addc editb"); eb.textContent = "⋯"; eb.title = "수정·순서·삭제";
+    eb.setAttribute("aria-label", "항목 수정");
+    eb.onclick = () => {
+      const open = S.open !== ekey;
+      S.open = open ? ekey : null;
+      S.focusEdit = open;
+      render();
+    };
+    row.append(box, tx, ac, eb); li.appendChild(row);
 
     if (b.cmts.length){
       const ul = el("ul","cmts");
@@ -669,10 +707,22 @@ function card(d,t){
       li.appendChild(inputRow("실제로는…", v => {
         S.open = null; mutate(path, {k:"comment", ln:b.ln, prev:b.text, s:v}, `note ${d} ${t}`);
       }));
-    if (S.open === ekey)
-      li.appendChild(editRow(b.text,
-        v  => { S.open=null; mutate(path, {k:"edit", ln:b.ln, prev:b.text, s:v}, `edit ${d} ${t}`); },
-        () => { S.open=null; mutate(path, {k:"del",  ln:b.ln, prev:b.text},     `drop ${d} ${t}`); }));
+    if (S.open === ekey){
+      const mv = dir => ({k:"move", ln:b.ln, prev:b.text, dir});
+      li.appendChild(editRow(b.text, {
+        canUp:   applyOp(mv(-1), rec.text) !== rec.text,
+        canDown: applyOp(mv(1),  rec.text) !== rec.text,
+        save: v => { S.open=null; mutate(path, {k:"edit", ln:b.ln, prev:b.text, s:v}, `edit ${d} ${t}`); },
+        del: () => { S.open=null; mutate(path, {k:"del",  ln:b.ln, prev:b.text},     `drop ${d} ${t}`); },
+        move: dir => {                                   // 옮긴 뒤에도 편집창은 그 항목을 따라간다
+          const after = applyOp(mv(dir), rec.text);
+          if (after === rec.text) return;
+          const nl = findItemLine(after, b.text, b.ln + dir * 2);
+          S.open = nl >= 0 ? path+"::edit::"+nl : null;
+          mutate(path, mv(dir), `move ${d} ${t}`);
+        },
+      }));
+    }
     list.appendChild(li);
   }
 
@@ -827,6 +877,7 @@ function render(){
     </div>`;
     document.getElementById("prev").onclick = () => shiftMonth(-1);
     document.getElementById("next").onclick = () => shiftMonth(1);
+    attachSwipe(root.querySelector(".app"), k => { if (S.view === "date") shiftDate(k); });
     document.getElementById("pending").onclick = () => flushQueue();
     document.getElementById("topics").onclick = () => {
       S.topicsOpen = !S.topicsOpen; S.topicMsg = "";
@@ -899,6 +950,30 @@ function render(){
   if (sel && S.view === "date") sel.scrollIntoView({ block:"nearest", inline:"center" });
 }
 
+// 날짜 하나로 옮긴다. 달을 넘어가면 그 달을 불러온다.
+async function goToDate(d){
+  S.view = "date"; S.date = d; S.open = null;
+  const ym = d.slice(0,7);
+  if (ym === S.ym){ render(); return; }
+  S.ym = ym; render();
+  try { await loadMonth(ym); } catch(e){ setStatus(e.message, true); }
+}
+const shiftDate = k => {
+  const t = new Date(S.date + "T12:00:00");
+  t.setDate(t.getDate() + k);
+  goToDate(localDate(t));
+};
+
+// 자정을 넘겨도 앱을 켜둔 채면 오늘이 어제로 남는다. 주기적으로 다시 본다.
+function refreshToday(){
+  const now = localDate();
+  if (now === TODAY) return;
+  const wasOnToday = S.date === TODAY;
+  TODAY = now;
+  if (wasOnToday && S.view === "date") goToDate(TODAY);   // 옮겨다니지 않았다면 따라간다
+  else render();
+}
+
 async function shiftMonth(k){
   const [y,m] = S.ym.split("-").map(Number);
   const d = new Date(y, m-1+k, 1);
@@ -957,8 +1032,12 @@ async function boot(){
 // 온라인으로 돌아오면 알아서 다시 보낸다
 window.addEventListener("online",  () => { setStatus(""); flushQueue(); });
 window.addEventListener("offline", () => paintStatus());
-document.addEventListener("visibilitychange", () => { if (!document.hidden) flushQueue(); });
-setInterval(() => { if (QUEUE.length) flushQueue(); }, 30000);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  refreshToday();                                    // 하루 넘겨 다시 열었을 수 있다
+  flushQueue();
+});
+setInterval(() => { refreshToday(); if (QUEUE.length) flushQueue(); }, 30000);
 
 boot();
 </script>
