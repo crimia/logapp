@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>기록</title>
+<style>
+  :root{
+    --paper:#eceff2; --surface:#fff; --ink:#15222c; --muted:#67798a;
+    --rule:#d3dbe2; --rule-soft:#e6ebef;
+    --c0:#2f7d6f; --c1:#4a5f9e; --c2:#8a6a3d; --c3:#8a3d4f; --c4:#3d6a8a; --c5:#6a6a3d;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .app{max-width:560px;margin:0 auto;min-height:100vh}
+
+  .top{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--rule);
+       padding-top:env(safe-area-inset-top)}
+  .bar{display:flex;align-items:baseline;gap:8px;padding:12px 14px 8px}
+  .month{font-size:17px;font-weight:640;letter-spacing:-.01em}
+  .nav{font:inherit;font-size:15px;color:var(--muted);background:none;border:0;padding:0 5px;cursor:pointer}
+  .nav:hover{color:var(--ink)}
+  .bar .spacer{flex:1}
+  .status{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .status.err{color:#a33}
+  .gear{font:inherit;font-size:14px;background:none;border:0;color:var(--muted);cursor:pointer;padding:0 2px}
+  .gear:hover{color:var(--ink)}
+
+  .grid-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;padding-bottom:8px}
+  .grid-scroll::-webkit-scrollbar{height:0}
+  .grid{display:grid;grid-auto-rows:min-content;width:max-content}
+  .corner,.rowlabel{position:sticky;left:0;z-index:2;background:var(--surface);
+                    border-right:1px solid var(--rule-soft)}
+  .corner{height:30px}
+  .dayhead{font:inherit;background:none;border:0;padding:2px 0 4px;cursor:pointer;
+           display:flex;flex-direction:column;align-items:center;border-bottom:2px solid transparent}
+  .dayhead .dow{font-family:var(--mono);font-size:8.5px;color:var(--muted);line-height:1.3}
+  .dayhead .num{font-family:var(--mono);font-size:11.5px;line-height:1.3;font-variant-numeric:tabular-nums}
+  .dayhead.weekend .dow,.dayhead.weekend .num{color:#9aa9b5}
+  .dayhead.is-today{border-bottom-color:var(--ink)}
+  .dayhead.is-today .num{font-weight:700}
+  .dayhead.sel{background:#e3e9ee}
+  .rowlabel{font:inherit;font-size:12px;color:var(--muted);border:0;
+            border-right:1px solid var(--rule-soft);text-align:left;
+            padding:0 8px 0 14px;cursor:pointer;height:26px;
+            max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rowlabel.sel{color:var(--ink);font-weight:620}
+  .cell{height:26px;border:0;background:none;cursor:pointer;padding:0;
+        display:flex;align-items:center;justify-content:center}
+  .cell.sel{background:#e3e9ee}
+  .mk{width:9px;height:9px;border-radius:1px}
+  .mk.none{width:3px;height:3px;border-radius:50%;background:var(--rule)}
+  .mk.open{border:1.5px solid currentColor}
+  .mk.full{background:currentColor}
+
+  .viewhead{display:flex;align-items:baseline;gap:9px;padding:16px 14px 8px}
+  .viewhead h2{margin:0;font-size:16px;font-weight:640;letter-spacing:-.01em}
+  .viewhead .sub{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+
+  .stack{padding:0 14px 90px;display:flex;flex-direction:column;gap:10px}
+  .card{background:var(--surface);border:1px solid var(--rule-soft);
+        border-left:2px solid currentColor;border-radius:4px;padding:11px 13px 13px}
+  .card-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .card-name{font:inherit;font-size:12.5px;font-weight:620;color:currentColor;
+             background:none;border:0;padding:0;cursor:pointer}
+  .card-top .spacer{flex:1}
+  .rawbtn{font:inherit;font-size:11px;color:var(--muted);background:none;border:0;
+          padding:2px 4px;cursor:pointer;border-radius:3px}
+  .rawbtn:hover{color:var(--ink);background:var(--paper)}
+
+  .sect{margin-top:9px}
+  .sect:first-of-type{margin-top:0}
+  .sect h3{margin:0 0 5px;font-size:11.5px;font-weight:600;color:var(--muted)}
+  .note{color:var(--ink);font-size:14px;margin:0;white-space:pre-wrap}
+
+  ul.items{list-style:none;margin:0;padding:0}
+  li.item{padding:2px 0}
+  .row{display:flex;gap:9px;align-items:flex-start}
+  .box{flex:0 0 auto;margin-top:3px;width:15px;height:15px;border-radius:3px;
+       border:1.5px solid var(--rule);background:var(--surface);cursor:pointer;padding:0;
+       display:flex;align-items:center;justify-content:center}
+  .box.on{background:currentColor;border-color:currentColor}
+  .box svg{width:9px;height:9px;opacity:0;transition:opacity .12s ease}
+  .box.on svg{opacity:1}
+  .txt{flex:1;font-size:14.5px;line-height:1.5}
+  .item.done .txt{color:var(--muted)}
+  .addc{flex:0 0 auto;font:inherit;font-size:16px;line-height:1;color:var(--rule);
+        background:none;border:0;cursor:pointer;padding:2px 4px;border-radius:3px}
+  .addc:hover{color:var(--ink);background:var(--paper)}
+  .cmts{list-style:none;margin:3px 0 4px 14px;padding:0 0 0 10px;border-left:2px solid currentColor}
+  .cmts li{font-size:13.5px;line-height:1.5;color:var(--ink);padding:1px 0}
+
+  .inline{display:flex;gap:6px;margin:4px 0 6px 24px}
+  .inline input{flex:1;font:inherit;font-size:13.5px;padding:5px 8px;min-width:0;
+                border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink)}
+  .inline button{font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer;
+                 border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
+  .additem{font:inherit;font-size:12.5px;color:var(--muted);background:none;border:0;
+           padding:4px 0 0 24px;cursor:pointer}
+  .additem:hover{color:var(--ink)}
+
+  pre.raw{margin:9px 0 0;padding:10px;background:#f6f8f9;border:1px solid var(--rule-soft);
+          border-radius:3px;font-family:var(--mono);font-size:11.5px;line-height:1.6;
+          color:#3c4b57;white-space:pre-wrap;word-break:break-all}
+
+  .empty{border:1px dashed var(--rule);border-radius:4px;padding:12px 13px;
+         display:flex;align-items:center;gap:10px}
+  .empty .name{font-size:12.5px;font-weight:620;color:currentColor}
+  .empty .msg{font-size:13px;color:var(--muted);flex:1}
+  .empty button{font:inherit;font-size:12.5px;padding:4px 10px;cursor:pointer;
+                border:1px solid var(--rule);background:var(--surface);color:var(--ink);border-radius:3px}
+
+  .datehead{display:flex;align-items:baseline;gap:8px;padding:14px 0 2px}
+  .datehead:first-child{padding-top:0}
+  .datehead button{font:inherit;font-family:var(--mono);font-size:12.5px;font-weight:600;
+                   color:var(--ink);background:none;border:0;padding:0;cursor:pointer}
+  .datehead .dow2{font-size:11.5px;color:var(--muted)}
+
+  /* setup */
+  .setup{max-width:400px;margin:0 auto;padding:48px 22px}
+  .setup h1{font-size:19px;font-weight:640;margin:0 0 6px;letter-spacing:-.01em}
+  .setup p.lead{font-size:14px;color:var(--muted);margin:0 0 26px;line-height:1.6}
+  .fld{margin-bottom:15px}
+  .fld label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px}
+  .fld input{width:100%;font:inherit;font-size:15px;padding:9px 11px;
+             border:1px solid var(--rule);border-radius:4px;background:var(--surface);color:var(--ink)}
+  .fld .hint{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .setup .go{width:100%;font:inherit;font-size:15px;font-weight:600;padding:11px;
+             margin-top:10px;cursor:pointer;border:0;border-radius:4px;background:var(--ink);color:#fff}
+  .setup .msg{font-size:13px;color:#a33;margin-top:12px;line-height:1.5;min-height:1em}
+  .setup .out{font:inherit;font-size:12.5px;color:var(--muted);background:none;border:0;
+              padding:14px 0 0;cursor:pointer;text-decoration:underline}
+  :focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body><div id="root"></div>
+<script>
+"use strict";
+
+/* ═══ 설정 ═══════════════════════════════════════════ */
+const CFG_KEY = "celllog.cfg";
+const LOGDIR  = "log";
+let CFG = null;
+try { CFG = JSON.parse(localStorage.getItem(CFG_KEY) || "null"); } catch(e){}
+
+/* ═══ 깃허브 API ═════════════════════════════════════
+   서버 없음. 브라우저에서 직접 호출하고 커밋한다.     */
+const API = "https://api.github.com";
+const hdr = () => ({
+  Authorization: "Bearer " + CFG.token,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+});
+const encPath = p => p.split("/").map(encodeURIComponent).join("/");
+const repoURL = p => `${API}/repos/${CFG.owner}/${CFG.repo}/contents/${encPath(p)}`;
+
+function b64d(s){
+  const bin = atob(s.replace(/\s/g, ""));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+function b64e(s){
+  let bin = "";
+  new TextEncoder().encode(s).forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin);
+}
+async function why(r){
+  let m = ""; try { m = (await r.json()).message || ""; } catch(e){}
+  if (r.status === 401) return "토큰이 거부됐습니다. 만료됐거나 잘못 복사됐습니다.";
+  if (r.status === 403) return "권한이 없습니다. 토큰에 Contents 쓰기 권한과 이 저장소가 포함됐는지 확인하세요.";
+  if (r.status === 404) return "저장소를 못 찾았습니다. 계정명·저장소명, 그리고 토큰의 저장소 선택을 확인하세요.";
+  return `${r.status} ${m}`;
+}
+
+async function ghList(dir){
+  const r = await fetch(repoURL(dir) + "?ref=" + CFG.branch, { headers: hdr() });
+  if (r.status === 404) return [];
+  if (!r.ok) throw new Error(await why(r));
+  const j = await r.json();
+  return Array.isArray(j) ? j : [];
+}
+async function ghRead(path){
+  const r = await fetch(repoURL(path) + "?ref=" + CFG.branch, { headers: hdr() });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(await why(r));
+  const j = await r.json();
+  return { text: b64d(j.content), sha: j.sha };
+}
+async function ghWrite(path, text, sha, msg){
+  const body = { message: msg, content: b64e(text), branch: CFG.branch };
+  if (sha) body.sha = sha;
+  const r = await fetch(repoURL(path), {
+    method: "PUT",
+    headers: { ...hdr(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw Object.assign(new Error(await why(r)), { status: r.status });
+  return (await r.json()).content.sha;
+}
+
+/* ═══ 상태 ═══════════════════════════════════════════ */
+const TODAY = new Date().toISOString().slice(0,10);
+const S = {
+  view:"date", ym:TODAY.slice(0,7), date:TODAY, topic:null,
+  topics:[], store:{}, present:new Set(),
+  raw:new Set(), open:null, status:"", err:false, loading:true,
+};
+const pad  = n => String(n).padStart(2,"0");
+const DOW  = ["일","월","화","수","목","금","토"];
+const dow  = d => DOW[new Date(d+"T00:00:00").getDay()];
+const nfc  = s => s.normalize("NFC");
+const cellPath = (d,t) => `${LOGDIR}/${d.slice(0,7)}/${d}__${nfc(t)}.md`;
+const daysIn = ym => new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
+const tcolor = t => `var(--c${S.topics.indexOf(t) % 6})`;
+const TEMPLATE = (d,t) => `---\ndate: ${d}\ntopic: ${t}\n---\n## 계획\n- [ ] `;
+
+function setStatus(msg, err){ S.status = msg; S.err = !!err; paintStatus(); }
+function paintStatus(){
+  const e = document.getElementById("status");
+  if (e){ e.textContent = S.status; e.className = "status" + (S.err ? " err" : ""); }
+}
+
+/* ═══ 로드 ═══════════════════════════════════════════ */
+async function loadTopics(){
+  const f = await ghRead("topics.json");
+  if (f){ try { const j = JSON.parse(f.text); if (Array.isArray(j) && j.length) return j.map(nfc); } catch(e){} }
+  return ["운동","스케쥴","사주"];
+}
+async function loadMonth(ym){
+  S.loading = true; setStatus("불러오는 중");
+  const entries = (await ghList(`${LOGDIR}/${ym}`))
+    .filter(e => e.type === "file" && e.name.endsWith(".md"));
+  S.present = new Set();
+  for (const e of entries) S.present.add(nfc(e.path));
+  render();
+  await Promise.all(entries.map(async e => {
+    if (S.store[nfc(e.path)]) return;
+    try { const c = await ghRead(e.path); if (c) S.store[nfc(e.path)] = c; } catch(err){}
+  }));
+  S.loading = false; setStatus("");
+  render();
+}
+
+/* ═══ 파서 (화면용) ══════════════════════════════════ */
+function parse(raw){
+  const lines = raw.split("\n");
+  let i = 0;
+  if (lines[0] === "---"){ i = 1; while (i < lines.length && lines[i] !== "---") i++; i++; }
+  const blocks = [];
+  for (; i < lines.length; i++){
+    const line = lines[i]; let m;
+    if ((m = line.match(/^##\s+(.*)$/)))              blocks.push({kind:"h", text:m[1]});
+    else if ((m = line.match(/^- \[([ xX])\]\s?(.*)$/)))
+      blocks.push({kind:"item", done:m[1].toLowerCase()==="x", text:m[2], ln:i, cmts:[]});
+    else if ((m = line.match(/^\s{2,}- (.*)$/))){
+      const last = blocks[blocks.length-1];
+      if (last && last.kind === "item") last.cmts.push(m[1]);
+      else blocks.push({kind:"p", text:line.trim()});
+    } else if (line.trim()){
+      const last = blocks[blocks.length-1];
+      if (last && last.kind === "p") last.text += "\n" + line;
+      else blocks.push({kind:"p", text:line});
+    }
+  }
+  return blocks;
+}
+
+/* ═══ 줄 단위 편집 ═══════════════════════════════════
+   파싱 결과를 되돌려 쓰지 않는다. 해당 줄만 손댄다.   */
+const opToggle = ln => text => {
+  const L = text.split("\n");
+  if (!/^- \[[ xX]\]/.test(L[ln] || "")) return text;
+  L[ln] = /^- \[ \]/.test(L[ln]) ? L[ln].replace("- [ ]","- [x]") : L[ln].replace(/^- \[[xX]\]/,"- [ ]");
+  return L.join("\n");
+};
+const opComment = (ln, s) => text => {
+  const L = text.split("\n");
+  let at = ln + 1;
+  while (at < L.length && /^\s{2,}- /.test(L[at])) at++;
+  L.splice(at, 0, "    - " + s);
+  return L.join("\n");
+};
+const opAddItem = s => text => {
+  const L = text.split("\n");
+  let at = L.length;
+  for (let i = L.length - 1; i >= 0; i--)
+    if (/^- \[[ xX]\]/.test(L[i]) || /^\s{2,}- /.test(L[i])){ at = i + 1; break; }
+  if (L[at-1] !== undefined && L[at-1].trim() === "- [ ]") { L[at-1] = "- [ ] " + s; return L.join("\n"); }
+  L.splice(at, 0, "- [ ] " + s);
+  return L.join("\n");
+};
+
+/* ═══ 저장 (커밋) ════════════════════════════════════ */
+const chains = {};
+function mutate(path, op, msg){
+  path = nfc(path);
+  const rec = S.store[path] || { text:"", sha:null };
+  S.store[path] = { text: op(rec.text), sha: rec.sha };   // 낙관적 반영
+  S.present.add(path);
+  render();
+  const run = async () => {
+    setStatus("저장 중");
+    const cur = S.store[path];
+    try {
+      const sha = await ghWrite(path, cur.text, cur.sha, msg);
+      S.store[path] = { text: cur.text, sha };
+      setStatus("저장됨");
+    } catch(e){
+      if (e.status === 409 || e.status === 422){
+        const fresh = await ghRead(path);            // 밖에서 바뀐 경우
+        if (fresh){
+          const merged = op(fresh.text);
+          const sha = await ghWrite(path, merged, fresh.sha, msg);
+          S.store[path] = { text: merged, sha };
+          setStatus("저장됨");
+        }
+      } else { setStatus(e.message, true); }
+    }
+    render();
+  };
+  chains[path] = (chains[path] || Promise.resolve()).then(run).catch(e => setStatus(String(e.message||e), true));
+}
+
+/* ═══ 그리기 ═════════════════════════════════════════ */
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+
+function cellState(d,t){
+  const p = cellPath(d,t);
+  if (!S.present.has(p)) return "none";
+  const rec = S.store[p];
+  if (!rec) return "full";
+  const items = rec.text.split("\n").filter(l => /^- \[[ xX]\]/.test(l));
+  if (!items.length) return "full";
+  return items.some(l => /^- \[ \]/.test(l)) ? "open" : "full";
+}
+
+function drawGrid(g){
+  const N = daysIn(S.ym);
+  g.style.gridTemplateColumns = `48px repeat(${N}, 24px)`;
+  g.innerHTML = "";
+  g.appendChild(el("div","corner"));
+  for (let n=1;n<=N;n++){
+    const d = `${S.ym}-${pad(n)}`, w = dow(d);
+    const b = el("button","dayhead");
+    if (w==="토"||w==="일") b.classList.add("weekend");
+    if (d===TODAY) b.classList.add("is-today");
+    if (S.view==="date" && d===S.date) b.classList.add("sel");
+    b.innerHTML = `<span class="dow">${w}</span><span class="num">${n}</span>`;
+    b.onclick = () => { S.view="date"; S.date=d; render(); };
+    g.appendChild(b);
+  }
+  for (const t of S.topics){
+    const lab = el("button","rowlabel");
+    lab.textContent = t;
+    if (S.view==="topic" && S.topic===t) lab.classList.add("sel");
+    lab.onclick = () => { S.view="topic"; S.topic=t; render(); };
+    g.appendChild(lab);
+    for (let n=1;n<=N;n++){
+      const d = `${S.ym}-${pad(n)}`;
+      const c = el("button","cell");
+      c.style.color = tcolor(t);
+      if ((S.view==="date" && d===S.date) || (S.view==="topic" && S.topic===t)) c.classList.add("sel");
+      c.appendChild(el("span","mk " + cellState(d,t)));
+      c.setAttribute("aria-label", `${n}일 ${t}`);
+      c.onclick = () => { if (S.view==="topic") S.topic=t; S.date=d; render(); };
+      g.appendChild(c);
+    }
+  }
+}
+
+function inputRow(ph, done){
+  const w = el("div","inline");
+  const i = el("input"); i.placeholder = ph;
+  const b = el("button"); b.textContent = "저장";
+  const go = () => { const v = i.value.trim(); if (v) done(v); };
+  b.onclick = go;
+  i.onkeydown = e => { if (e.key==="Enter") go(); if (e.key==="Escape"){ S.open=null; render(); } };
+  w.append(i,b);
+  setTimeout(()=>i.focus(),0);
+  return w;
+}
+
+function card(d,t){
+  const path = cellPath(d,t), rec = S.store[path];
+
+  if (!S.present.has(path)){
+    const e = el("div","empty"); e.style.color = tcolor(t);
+    e.innerHTML = `<span class="name">${t}</span><span class="msg">아직 안 씀</span>`;
+    const b = el("button"); b.textContent = "쓰기";
+    b.onclick = () => {
+      S.store[path] = { text:"", sha:null };
+      mutate(path, () => TEMPLATE(d,t), `add ${d} ${t}`);
+      S.open = path + "::new";
+    };
+    e.appendChild(b); return e;
+  }
+  if (!rec){
+    const e = el("div","empty"); e.style.color = tcolor(t);
+    e.innerHTML = `<span class="name">${t}</span><span class="msg">불러오는 중</span>`;
+    return e;
+  }
+
+  const c = el("div","card"); c.style.color = tcolor(t);
+  const top = el("div","card-top");
+  const nm = el("button","card-name"); nm.textContent = t;
+  nm.onclick = () => { S.view="topic"; S.topic=t; S.date=d; render(); };
+  top.append(nm, el("span","spacer"));
+  const rb = el("button","rawbtn");
+  rb.textContent = S.raw.has(path) ? "원본 닫기" : "원본";
+  rb.onclick = () => { S.raw.has(path) ? S.raw.delete(path) : S.raw.add(path); render(); };
+  top.appendChild(rb);
+  c.appendChild(top);
+
+  let sect = null, list = null;
+  const newSect = title => {
+    sect = el("div","sect");
+    if (title){ const h = el("h3"); h.textContent = title; sect.appendChild(h); }
+    list = null; c.appendChild(sect);
+  };
+
+  for (const b of parse(rec.text)){
+    if (b.kind === "h"){ newSect(b.text); continue; }
+    if (!sect) newSect(null);
+    if (b.kind === "p"){ const p = el("p","note"); p.textContent = b.text; sect.appendChild(p); continue; }
+
+    if (!list){ list = el("ul","items"); sect.appendChild(list); }
+    const li = el("li","item" + (b.done ? " done" : ""));
+    const row = el("div","row");
+    const box = el("button","box" + (b.done ? " on" : ""));
+    box.innerHTML = `<svg viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2.2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 L5 8.6 L9.5 3.6"/></svg>`;
+    box.setAttribute("aria-pressed", b.done);
+    box.onclick = () => mutate(path, opToggle(b.ln), `${b.done?"uncheck":"check"} ${d} ${t}`);
+
+    const tx = el("div","txt"); tx.textContent = b.text;
+    const ac = el("button","addc"); ac.textContent = "+"; ac.title = "실행 코멘트";
+    ac.onclick = () => { S.open = path+"::"+b.ln; render(); };
+    row.append(box, tx, ac); li.appendChild(row);
+
+    if (b.cmts.length){
+      const ul = el("ul","cmts");
+      for (const cm of b.cmts){ const x = el("li"); x.textContent = cm; ul.appendChild(x); }
+      li.appendChild(ul);
+    }
+    if (S.open === path+"::"+b.ln)
+      li.appendChild(inputRow("실제로는…", v => { S.open=null; mutate(path, opComment(b.ln, v), `note ${d} ${t}`); }));
+    list.appendChild(li);
+  }
+
+  if (S.open === path+"::new")
+    c.appendChild(inputRow("할 일", v => mutate(path, opAddItem(v), `plan ${d} ${t}`)));
+  else {
+    const ai = el("button","additem"); ai.textContent = "+ 항목";
+    ai.onclick = () => { S.open = path+"::new"; render(); };
+    c.appendChild(ai);
+  }
+  if (S.raw.has(path)){ const pre = el("pre","raw"); pre.textContent = rec.text; c.appendChild(pre); }
+  return c;
+}
+
+function render(){
+  const root = document.getElementById("root");
+  if (!root.querySelector(".app")){
+    root.innerHTML = `<div class="app">
+      <div class="top">
+        <div class="bar">
+          <button class="nav" id="prev">‹</button>
+          <span class="month" id="monthLbl"></span>
+          <button class="nav" id="next">›</button>
+          <span class="spacer"></span>
+          <span class="status" id="status"></span>
+          <button class="gear" id="gear">설정</button>
+        </div>
+        <div class="grid-scroll" id="gridScroll"><div class="grid" id="grid"></div></div>
+      </div>
+      <div class="viewhead" id="viewhead"></div>
+      <div class="stack" id="stack"></div>
+    </div>`;
+    document.getElementById("prev").onclick = () => shiftMonth(-1);
+    document.getElementById("next").onclick = () => shiftMonth(1);
+    document.getElementById("gear").onclick = () => {
+      if (confirm("설정을 지우고 다시 연결할까요? 기록은 저장소에 그대로 남습니다."))
+        { localStorage.removeItem(CFG_KEY); location.reload(); }
+    };
+  }
+
+  document.getElementById("monthLbl").textContent = `${+S.ym.slice(5)}월`;
+  paintStatus();
+  drawGrid(document.getElementById("grid"));
+
+  const vh = document.getElementById("viewhead"), st = document.getElementById("stack");
+  vh.innerHTML = ""; st.innerHTML = "";
+
+  if (S.view === "date"){
+    const n = +S.date.slice(-2);
+    vh.innerHTML = `<h2>${+S.ym.slice(5)}월 ${n}일 ${dow(S.date)}요일</h2>
+      <span class="sub">${S.date===TODAY ? "오늘" : ""}</span>`;
+    for (const t of S.topics) st.appendChild(card(S.date, t));
+  } else {
+    vh.innerHTML = `<h2>${S.topic}</h2><span class="sub">${+S.ym.slice(5)}월</span>`;
+    const N = daysIn(S.ym);
+    let any = false;
+    for (let n=1;n<=N;n++){
+      const d = `${S.ym}-${pad(n)}`;
+      if (!S.present.has(cellPath(d, S.topic))) continue;
+      any = true;
+      const h = el("div","datehead");
+      const b = el("button"); b.textContent = `${+S.ym.slice(5)}월 ${n}일`;
+      b.onclick = () => { S.view="date"; S.date=d; render(); };
+      const w = el("span","dow2"); w.textContent = dow(d);
+      h.append(b,w); h.dataset.date = d;
+      st.append(h, card(d, S.topic));
+    }
+    if (!any){
+      const e = el("div","empty"); e.style.color = tcolor(S.topic);
+      e.innerHTML = `<span class="msg">이번 달 기록이 없습니다. 위 그리드에서 날짜를 고르세요.</span>`;
+      st.appendChild(e);
+    }
+    const a = st.querySelector(`[data-date="${S.date}"]`);
+    if (a) requestAnimationFrame(() =>
+      window.scrollTo({ top: a.getBoundingClientRect().top + window.scrollY - 118 }));
+  }
+
+  const sc = document.getElementById("gridScroll");
+  const sel = sc.querySelector(".dayhead.sel") || sc.querySelector(".dayhead.is-today");
+  if (sel && S.view === "date") sel.scrollIntoView({ block:"nearest", inline:"center" });
+}
+
+async function shiftMonth(k){
+  const [y,m] = S.ym.split("-").map(Number);
+  const d = new Date(y, m-1+k, 1);
+  S.ym = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+  S.date = `${S.ym}-01`;
+  render();
+  try { await loadMonth(S.ym); } catch(e){ setStatus(e.message, true); }
+}
+
+/* ═══ 첫 연결 화면 ═══════════════════════════════════ */
+function setupScreen(){
+  document.getElementById("root").innerHTML = `<div class="setup">
+    <h1>저장소에 연결</h1>
+    <p class="lead">기록은 이 기기가 아니라 깃허브 저장소에 저장됩니다. 토큰은 이 폰에만 남습니다.</p>
+    <div class="fld"><label for="o">깃허브 계정명</label><input id="o" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="fld"><label for="r">저장소 이름</label><input id="r" value="mylog" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="fld"><label for="t">액세스 토큰</label><input id="t" type="password" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="hint">Settings → Developer settings → Fine-grained tokens에서 발급. Contents를 Read and write로.</div></div>
+    <button class="go" id="go">연결</button>
+    <div class="msg" id="msg"></div>
+  </div>`;
+  const msg = document.getElementById("msg");
+  document.getElementById("go").onclick = async () => {
+    const owner = document.getElementById("o").value.trim();
+    const repo  = document.getElementById("r").value.trim();
+    const token = document.getElementById("t").value.trim();
+    if (!owner || !repo || !token){ msg.textContent = "세 칸 모두 채워주세요."; return; }
+    msg.textContent = "확인 중…";
+    CFG = { owner, repo, token, branch:"main" };
+    try {
+      const r = await fetch(`${API}/repos/${owner}/${repo}`, { headers: hdr() });
+      if (!r.ok) throw new Error(await why(r));
+      CFG.branch = (await r.json()).default_branch || "main";
+      localStorage.setItem(CFG_KEY, JSON.stringify(CFG));
+      boot();
+    } catch(e){ CFG = null; msg.textContent = e.message; }
+  };
+}
+
+/* ═══ 시작 ═══════════════════════════════════════════ */
+async function boot(){
+  if (!CFG){ setupScreen(); return; }
+  document.getElementById("root").innerHTML = "";
+  try {
+    S.topics = await loadTopics();
+    S.topic  = S.topics[0];
+    render();
+    await loadMonth(S.ym);
+  } catch(e){
+    render();
+    setStatus(e.message, true);
+  }
+}
+boot();
+</script>
+</body>
+</html>
