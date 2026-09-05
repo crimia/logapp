@@ -59,20 +59,38 @@
   .mk.open{border:1.5px solid currentColor}
   .mk.full{background:currentColor}
 
+  /* 가로 제스처는 앱이 쓴다. 상단 그리드는 제 가로 스크롤을 그대로 둔다. */
+  .viewhead,.stack{touch-action:pan-y pinch-zoom}
   .viewhead{display:flex;align-items:baseline;gap:9px;padding:16px 14px 8px}
   .viewhead h2{margin:0;font-size:16px;font-weight:640;letter-spacing:-.01em}
   .viewhead .sub{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
 
-  .stack{padding:0 14px 90px;display:flex;flex-direction:column;gap:10px}
+  .stack{padding:0 14px 90px;display:flex;flex-direction:column;gap:10px;min-height:70vh}
   .card{background:var(--surface);border:1px solid var(--rule-soft);
         border-left:2px solid currentColor;border-radius:4px;padding:11px 13px 13px}
   .card-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .card-name{font:inherit;font-size:12.5px;font-weight:620;color:currentColor;
              background:none;border:0;padding:0;cursor:pointer}
   .card-top .spacer{flex:1}
-  .rawbtn{font:inherit;font-size:11px;color:var(--muted);background:none;border:0;
-          padding:2px 4px;cursor:pointer;border-radius:3px}
-  .rawbtn:hover{color:var(--ink);background:var(--paper)}
+  .plainbtn{font:inherit;font-size:11px;color:var(--muted);background:none;border:0;
+            padding:2px 4px;cursor:pointer;border-radius:3px}
+  .plainbtn:hover{color:var(--ink);background:var(--paper)}
+  .cardmenu{display:flex;align-items:center;gap:8px;margin:0 0 9px;padding:7px 9px;
+            background:var(--paper);border-radius:3px}
+  .cardmenu .spacer{flex:1}
+  .cardmenu .hint{font-size:11.5px;color:var(--muted)}
+  .cardfoot{display:flex;gap:16px}
+  .grouplab{font-size:11px;font-weight:600;color:var(--muted);margin:7px 0 3px;
+            letter-spacing:.02em}
+  .sect > .grouplab:first-of-type{margin-top:2px}
+  .tchip{font-family:var(--mono);font-size:12px;color:var(--muted);margin-right:7px;
+         font-variant-numeric:tabular-nums}
+  .noteblk{margin:0 0 2px}
+  .noterow{display:flex;align-items:flex-start;gap:6px}
+  .noterow .note{flex:1}
+  .noteta{width:100%;font:inherit;font-size:13.5px;line-height:1.55;padding:7px 8px;
+          border:1px solid var(--ink);border-radius:3px;background:var(--surface);
+          color:var(--ink);resize:vertical;box-sizing:border-box}
 
   .sect{margin-top:9px}
   .sect:first-of-type{margin-top:0}
@@ -157,8 +175,8 @@
   .edit{display:flex;gap:6px;align-items:center}
   .edit input{flex:1;min-width:0;font:inherit;font-size:13.5px;padding:5px 8px;
               border:1px solid var(--ink);border-radius:3px;background:var(--surface);color:var(--ink)}
-  .edit .save{font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer;
-              border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
+  .editwrap .save{font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer;
+                  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
   .editbar{display:flex;gap:6px;align-items:center;margin-top:5px}
   .editbar .spacer{flex:1}
   .movebtn{font:inherit;font-size:11.5px;color:var(--ink);background:var(--surface);
@@ -255,6 +273,15 @@ async function ghWrite(path, text, sha, msg){
   return (await r.json()).content.sha;
 }
 
+async function ghDelete(path, sha, msg){
+  const r = await fetch(repoURL(path), {
+    method: "DELETE",
+    headers: { ...hdr(), "Content-Type": "application/json" },
+    body: JSON.stringify({ message: msg, sha, branch: CFG.branch }),
+  });
+  if (!r.ok) throw await httpErr(r);
+}
+
 /* ═══ 상태 ═══════════════════════════════════════════ */
 const pad  = n => String(n).padStart(2,"0");
 // toISOString()은 UTC다. 한국은 자정부터 아침 9시까지 어제가 나온다.
@@ -263,7 +290,7 @@ let TODAY = localDate();
 const S = {
   view:"date", ym:TODAY.slice(0,7), date:TODAY, topic:null,
   topics:[], store:{}, present:new Set(),
-  raw:new Set(), open:null, status:"", err:false, loading:true,
+  open:null, status:"", err:false, loading:true,
   exportOpen:false, topicsOpen:false, topicMsg:"", focusEdit:false,
 };
 const DOW  = ["일","월","화","수","목","금","토"];
@@ -337,11 +364,12 @@ function parse(raw){
     else if ((m = line.match(/^\s{2,}- (.*)$/))){
       const last = blocks[blocks.length-1];
       if (last && last.kind === "item") last.cmts.push(m[1]);
-      else blocks.push({kind:"p", text:line.trim()});
+      else blocks.push({kind:"p", text:line, ln:i, end:i+1});
     } else if (line.trim()){
+      // 빈 줄로 갈린 문단은 따로 센다. 그래야 문단 하나만 골라 고칠 수 있다.
       const last = blocks[blocks.length-1];
-      if (last && last.kind === "p") last.text += "\n" + line;
-      else blocks.push({kind:"p", text:line});
+      if (last && last.kind === "p" && last.end === i){ last.text += "\n" + line; last.end = i+1; }
+      else blocks.push({kind:"p", text:line, ln:i, end:i+1});
     }
   }
   return blocks;
@@ -395,24 +423,16 @@ function applyOp(o, text){
       L.splice(o.ln, cmtEnd(L, o.ln) - o.ln);
       return L.join("\n");
 
-    case "move": {                                           // 항목을 딸린 코멘트째 이웃과 맞바꾼다
-      if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
-      const end = cmtEnd(L, o.ln), block = L.slice(o.ln, end);
-      if (o.dir < 0){
-        let q = o.ln - 1;
-        while (q >= 0 && !L[q].trim()) q--;                  // 사이의 빈 줄은 건너뛴다
-        while (q >= 0 && isCmt(L[q])) q--;                   // 앞 항목에 딸린 코멘트
-        if (q < 0 || !isItem(L[q])) return text;             // 소제목·본문은 넘지 않는다
-        L.splice(o.ln, block.length);
-        L.splice(q, 0, ...block);
-      } else {
-        let q = end;
-        while (q < L.length && !L[q].trim()) q++;
-        if (q >= L.length || !isItem(L[q])) return text;
-        const qEnd = cmtEnd(L, q);
-        L.splice(o.ln, block.length);
-        L.splice(qEnd - block.length, 0, ...block);
-      }
+    case "swap": {                                           // 두 항목을 딸린 코멘트째 맞바꾼다
+      const a = Math.min(o.ln, o.ln2), z = Math.max(o.ln, o.ln2);
+      const pa = o.ln < o.ln2 ? o.prev : o.prev2;
+      const pz = o.ln < o.ln2 ? o.prev2 : o.prev;
+      if (a === z || !isItem(L[a]) || !isItem(L[z])) return text;
+      if (itemText(L[a]) !== pa || itemText(L[z]) !== pz) return text;
+      const aEnd = cmtEnd(L, a), zEnd = cmtEnd(L, z);
+      if (aEnd > z) return text;                             // 겹친다
+      const A = L.slice(a, aEnd), Z = L.slice(z, zEnd), mid = L.slice(aEnd, z);
+      L.splice(a, zEnd - a, ...Z, ...mid, ...A);             // 사이에 낀 줄은 제자리에 둔다
       return L.join("\n");
     }
 
@@ -422,6 +442,37 @@ function applyOp(o, text){
         if (isItem(L[i]) || /^\s{2,}- /.test(L[i])){ at = i + 1; break; }
       if (L[at-1] !== undefined && L[at-1].trim() === "- [ ]"){ L[at-1] = "- [ ] " + o.s; return L.join("\n"); }
       L.splice(at, 0, "- [ ] " + o.s);
+      return L.join("\n");
+    }
+
+    case "editNote":                                         // 메모 문단. 그 줄 범위만 갈아 끼운다
+      if (L.slice(o.ln, o.end).join("\n") !== o.prev) return text;
+      L.splice(o.ln, o.end - o.ln, ...o.s.split("\n"));
+      return L.join("\n");
+
+    case "delNote": {
+      if (L.slice(o.ln, o.end).join("\n") !== o.prev) return text;
+      L.splice(o.ln, o.end - o.ln);
+      const before = o.ln > 0 ? L[o.ln-1] : null, at = L[o.ln];
+      // 문단이 빠지면서 소제목 바로 밑이나 빈 줄 뒤에 남은 빈 줄은 걷어낸다
+      if (at !== undefined && !at.trim() && (before === null || !before.trim() || /^##\s+/.test(before)))
+        L.splice(o.ln, 1);
+      return L.join("\n");
+    }
+
+    case "addNote": {                                        // ## 메모 끝에 붙인다. 없으면 만든다
+      let at = -1;
+      for (let i = 0; i < L.length; i++)
+        if (/^##\s+/.test(L[i]) && L[i].replace(/^##\s+/, "").trim() === "메모"){ at = i; break; }
+      if (at < 0){
+        while (L.length && !L[L.length-1].trim()) L.pop();
+        L.push("", "## 메모", ...o.s.split("\n"));
+        return L.join("\n");
+      }
+      let end = at + 1;
+      while (end < L.length && !/^##\s+/.test(L[end])) end++;
+      while (end > at + 1 && !L[end-1].trim()) end--;         // 섹션 끝의 빈 줄 앞에
+      L.splice(end, 0, ...(end > at + 1 ? [""] : []), ...o.s.split("\n"));
       return L.join("\n");
     }
 
@@ -462,6 +513,14 @@ async function flushQueue(){
       let fresh;
       try { fresh = await ghRead(job.path); }
       catch(e){ setStatus(retryable(e) ? "연결되면 보냄" : e.message, !retryable(e)); return; }
+      if (job.op.k === "rmfile"){                           // 칸 통째로 지우기
+        if (!fresh){ QUEUE.shift(); saveQueue(); continue; } // 이미 없다
+        try { await ghDelete(job.path, fresh.sha, job.msg); }
+        catch(e){ setStatus(retryable(e) ? "연결되면 보냄" : e.message, !retryable(e)); return; }
+        delete S.store[job.path]; S.present.delete(job.path);
+        QUEUE.shift(); saveQueue(); paintStatus();
+        continue;
+      }
       const base = fresh ? fresh.text : "";
       const next = applyOp(job.op, base);
       if (next === base){ QUEUE.shift(); saveQueue(); continue; }   // 이미 반영됐거나 대상이 사라졌다
@@ -517,6 +576,44 @@ function mutate(path, op, msg){
         }
       } else if (retryable(e)){
         enqueue(path, op, msg); setStatus("연결되면 보냄");
+      } else setStatus(e.message, true);
+    }
+    render();
+  };
+  chains[path] = (chains[path] || Promise.resolve()).then(run).catch(e => setStatus(String(e.message||e), true));
+}
+
+// 칸 하나를 통째로 지운다. 파일을 지우는 것이라 기록은 커밋 이력에만 남는다.
+function removeCell(path, msg){
+  path = nfc(path);
+  const known = S.store[path] ? S.store[path].sha : null;
+  S.present.delete(path); delete S.store[path];
+  render();
+  const run = async () => {
+    if (!navigator.onLine || queuedFor(path)){
+      enqueue(path, {k:"rmfile"}, msg);
+      setStatus(navigator.onLine ? "대기열에 넣음" : "오프라인");
+      await flushQueue();
+      return;
+    }
+    setStatus("지우는 중");
+    try {
+      let sha = known;
+      if (!sha){ const f = await ghRead(path); if (!f){ setStatus("지움"); render(); return; } sha = f.sha; }
+      await ghDelete(path, sha, msg);
+      setStatus("지움");
+    } catch(e){
+      if (e.status === 409 || e.status === 422){
+        try {
+          const fresh = await ghRead(path);                  // 밖에서 바뀐 경우
+          if (fresh) await ghDelete(path, fresh.sha, msg);
+          setStatus("지움");
+        } catch(e2){
+          if (retryable(e2)){ enqueue(path, {k:"rmfile"}, msg); setStatus("연결되면 보냄"); }
+          else setStatus(e2.message, true);
+        }
+      } else if (retryable(e)){
+        enqueue(path, {k:"rmfile"}, msg); setStatus("연결되면 보냄");
       } else setStatus(e.message, true);
     }
     render();
@@ -614,22 +711,82 @@ function editRow(initial, on){
   return w;
 }
 
-// 좌우로 밀면 날짜를 넘긴다. 세로 스크롤과 겹치지 않게 가로가 확실할 때만.
+// 좌우로 밀면 날짜를 넘긴다.
+// 터치에서는 포인터 이벤트를 쓰면 안 된다. 브라우저가 스크롤로 판정하는 순간
+// pointercancel이 오고 pointerup은 오지 않는다. touchend는 그래도 온다.
+// 본문에 touch-action:pan-y를 줘서 가로 제스처를 브라우저가 가져가지 않게 했다.
 function attachSwipe(node, go){
-  let x0 = 0, y0 = 0, t0 = 0, on = false;
-  node.addEventListener("pointerdown", e => {
-    on = !e.target.closest(".grid-scroll, input, textarea, button, pre");
-    x0 = e.clientX; y0 = e.clientY; t0 = Date.now();
-  });
-  node.addEventListener("pointerup", e => {
+  let x = 0, y = 0, t = 0, on = false;
+  const start = (cx, cy, target) => {
+    on = !(target.closest && target.closest(".grid-scroll, input, textarea, button, pre"));
+    x = cx; y = cy; t = Date.now();
+  };
+  const end = (cx, cy) => {
     if (!on) return;
     on = false;
-    const dx = e.clientX - x0, dy = e.clientY - y0;
-    if (Date.now() - t0 > 700) return;                       // 느긋한 동작은 스와이프가 아니다
+    const dx = cx - x, dy = cy - y;
+    if (Date.now() - t > 700) return;                        // 느긋한 동작은 스와이프가 아니다
     if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
     go(dx < 0 ? 1 : -1);                                     // 왼쪽으로 밀면 다음 날
-  });
-  node.addEventListener("pointercancel", () => { on = false; });
+  };
+
+  let last = null;
+  node.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1) { on = false; return; }
+    const p = e.touches[0]; last = p;
+    start(p.clientX, p.clientY, e.target);
+  }, { passive:true });
+  node.addEventListener("touchmove", e => {
+    if (e.touches.length !== 1) { on = false; return; }
+    last = e.touches[0];                                     // 취소되더라도 마지막 위치는 안다
+  }, { passive:true });
+  node.addEventListener("touchend", e => {
+    const p = (e.changedTouches && e.changedTouches[0]) || last;
+    if (p) end(p.clientX, p.clientY);
+  }, { passive:true });
+  node.addEventListener("touchcancel", () => { on = false; }, { passive:true });
+
+  node.addEventListener("pointerdown", e => { if (e.pointerType !== "touch") start(e.clientX, e.clientY, e.target); });
+  node.addEventListener("pointerup",   e => { if (e.pointerType !== "touch") end(e.clientX, e.clientY); });
+}
+
+// 시간이 앞에 붙은 항목을 시간별로 갈라 보여줄 주제. 이름 하나만 바꾸면 된다.
+const TIMED = new Set(["스케쥴"]);
+const TIME_RE = /^(\d{1,2}):(\d{2})(?:\s*[~\-–]\s*\d{1,2}:\d{2})?\s+(.+)$/;
+function itemTime(s){
+  const m = s.match(TIME_RE);
+  if (!m) return null;
+  return { mins: +m[1] * 60 + +m[2], label: s.slice(0, s.length - m[3].length).trim(), rest: m[3] };
+}
+
+// 메모 편집창. 여러 줄이라 textarea를 쓴다.
+function noteEdit(initial, on){
+  const w = el("div","editwrap");
+  const ta = el("textarea","noteta");
+  ta.value = initial;
+  ta.rows = Math.min(12, initial.split("\n").length + 1);
+  ta.placeholder = "메모";
+  const bar = el("div","editbar");
+  const b = el("button","save"); b.textContent = "저장";
+  const go = () => {
+    const v = ta.value.replace(/\s+$/,"");
+    if (v && v !== initial) on.save(v);
+    else { S.open = null; render(); }
+  };
+  b.onclick = go;
+  ta.onkeydown = e => {
+    if (e.key === "Escape"){ S.open = null; render(); }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go();
+  };
+  bar.append(b, el("span","spacer"));
+  if (on.del){
+    const x = el("button","delbtn"); x.textContent = "삭제";
+    x.onclick = on.del;                                    // 확인창 없이
+    bar.appendChild(x);
+  }
+  w.append(ta, bar);
+  if (S.focusEdit){ S.focusEdit = false; setTimeout(() => ta.focus(), 0); }
+  return w;
 }
 
 function card(d,t){
@@ -656,26 +813,25 @@ function card(d,t){
   const top = el("div","card-top");
   const nm = el("button","card-name"); nm.textContent = t;
   nm.onclick = () => { S.view="topic"; S.topic=t; S.date=d; render(); };
-  top.append(nm, el("span","spacer"));
-  const rb = el("button","rawbtn");
-  rb.textContent = S.raw.has(path) ? "원본 닫기" : "원본";
-  rb.onclick = () => { S.raw.has(path) ? S.raw.delete(path) : S.raw.add(path); render(); };
-  top.appendChild(rb);
+  const mkey = path + "::menu";
+  const mb = el("button","addc editb"); mb.textContent = "⋯";
+  mb.title = "칸 메뉴"; mb.setAttribute("aria-label", t + " 칸 메뉴");
+  mb.onclick = () => { S.open = S.open === mkey ? null : mkey; render(); };
+  top.append(nm, el("span","spacer"), mb);
   c.appendChild(top);
 
-  let sect = null, list = null;
-  const newSect = title => {
-    sect = el("div","sect");
-    if (title){ const h = el("h3"); h.textContent = title; sect.appendChild(h); }
-    list = null; c.appendChild(sect);
-  };
+  if (S.open === mkey){
+    const bar = el("div","cardmenu");
+    const h = el("span","hint"); h.textContent = `${d}의 ${t} 파일을 지웁니다`;
+    const rm = el("button","delbtn"); rm.textContent = "이 칸 지우기";
+    rm.title = "커밋 이력에는 남습니다";
+    rm.onclick = () => { S.open = null; removeCell(path, `remove ${d} ${t}`); };
+    bar.append(h, el("span","spacer"), rm);
+    c.appendChild(bar);
+  }
 
-  for (const b of parse(rec.text)){
-    if (b.kind === "h"){ newSect(b.text); continue; }
-    if (!sect) newSect(null);
-    if (b.kind === "p"){ const p = el("p","note"); p.textContent = b.text; sect.appendChild(p); continue; }
-
-    if (!list){ list = el("ul","items"); sect.appendChild(list); }
+  // 항목 하나. sib은 화면에 보이는 차례, i는 그 안에서의 자리.
+  const itemLi = (b, tm, sib, i) => {
     const li = el("li","item" + (b.done ? " done" : ""));
     const row = el("div","row");
     const box = el("button","box" + (b.done ? " on" : ""));
@@ -684,7 +840,12 @@ function card(d,t){
     box.setAttribute("aria-pressed", b.done);
     box.onclick = () => mutate(path, {k:"toggle", ln:b.ln, prev:b.text}, `${b.done?"uncheck":"check"} ${d} ${t}`);
 
-    const tx = el("div","txt"); tx.textContent = b.text;
+    const tx = el("div","txt");
+    if (tm){
+      const ts = el("span","tchip"); ts.textContent = tm.label;
+      tx.append(ts, document.createTextNode(tm.rest));
+    } else tx.textContent = b.text;
+
     const ac = el("button","addc"); ac.textContent = "+"; ac.title = "실행 코멘트";
     ac.onclick = () => { S.open = path+"::"+b.ln; render(); };
     const ekey = path+"::edit::"+b.ln;
@@ -708,32 +869,122 @@ function card(d,t){
         S.open = null; mutate(path, {k:"comment", ln:b.ln, prev:b.text, s:v}, `note ${d} ${t}`);
       }));
     if (S.open === ekey){
-      const mv = dir => ({k:"move", ln:b.ln, prev:b.text, dir});
+      // 파일 순서가 아니라 화면에 보이는 차례로 바꾼다.
+      // 스케쥴처럼 갈라 보여줄 때 file 이웃과 화면 이웃이 다르기 때문이다.
+      const mate = dir => (tm ? null : sib[i + dir]);       // 시간순 항목은 옮길 자리가 없다
       li.appendChild(editRow(b.text, {
-        canUp:   applyOp(mv(-1), rec.text) !== rec.text,
-        canDown: applyOp(mv(1),  rec.text) !== rec.text,
+        canUp:   !!mate(-1),
+        canDown: !!mate(1),
         save: v => { S.open=null; mutate(path, {k:"edit", ln:b.ln, prev:b.text, s:v}, `edit ${d} ${t}`); },
         del: () => { S.open=null; mutate(path, {k:"del",  ln:b.ln, prev:b.text},     `drop ${d} ${t}`); },
         move: dir => {                                   // 옮긴 뒤에도 편집창은 그 항목을 따라간다
-          const after = applyOp(mv(dir), rec.text);
+          const w = mate(dir);
+          if (!w) return;
+          const op = {k:"swap", ln:b.ln, prev:b.text, ln2:w.ln, prev2:w.text};
+          const after = applyOp(op, rec.text);
           if (after === rec.text) return;
-          const nl = findItemLine(after, b.text, b.ln + dir * 2);
+          const nl = findItemLine(after, b.text, w.ln);
           S.open = nl >= 0 ? path+"::edit::"+nl : null;
-          mutate(path, mv(dir), `move ${d} ${t}`);
+          mutate(path, op, `move ${d} ${t}`);
         },
       }));
     }
-    list.appendChild(li);
+    return li;
+  };
+
+  // 메모 문단 하나
+  const noteBlk = b => {
+    const wrap = el("div","noteblk");
+    const nkey = path+"::note::"+b.ln;
+    const row = el("div","noterow");
+    const p = el("p","note"); p.textContent = b.text;
+    const eb = el("button","addc editb"); eb.textContent = "⋯";
+    eb.title = "메모 수정·삭제"; eb.setAttribute("aria-label", "메모 수정");
+    eb.onclick = () => {
+      const open = S.open !== nkey;
+      S.open = open ? nkey : null;
+      S.focusEdit = open;
+      render();
+    };
+    row.append(p, eb);
+    wrap.appendChild(row);
+    if (S.open === nkey)
+      wrap.appendChild(noteEdit(b.text, {
+        save: v => { S.open=null; mutate(path, {k:"editNote", ln:b.ln, end:b.end, prev:b.text, s:v}, `memo ${d} ${t}`); },
+        del: () => { S.open=null; mutate(path, {k:"delNote", ln:b.ln, end:b.end, prev:b.text}, `drop memo ${d} ${t}`); },
+      }));
+    return wrap;
+  };
+
+  // 소제목으로 묶는다
+  const sects = [];
+  let cur = { title:null, blocks:[] };
+  for (const b of parse(rec.text)){
+    if (b.kind === "h"){
+      if (cur.title !== null || cur.blocks.length) sects.push(cur);
+      cur = { title:b.text, blocks:[] };
+    } else cur.blocks.push(b);
+  }
+  if (cur.title !== null || cur.blocks.length) sects.push(cur);
+
+  for (const s of sects){
+    const sect = el("div","sect");
+    if (s.title){ const h = el("h3"); h.textContent = s.title; sect.appendChild(h); }
+
+    const items = s.blocks.filter(b => b.kind === "item");
+    const timed = TIMED.has(t)
+      ? items.map((b,i) => ({ b, i, tm: itemTime(b.text) })).filter(x => x.tm)
+      : [];
+
+    if (timed.length){                                   // 할 일 먼저, 그 아래 시간표
+      const plain = items.filter(b => !itemTime(b.text));
+      if (plain.length){
+        const lb = el("div","grouplab"); lb.textContent = "할 일"; sect.appendChild(lb);
+        const ul = el("ul","items");
+        plain.forEach((b,i) => ul.appendChild(itemLi(b, null, plain, i)));
+        sect.appendChild(ul);
+      }
+      const lb2 = el("div","grouplab"); lb2.textContent = "시간"; sect.appendChild(lb2);
+      const ul2 = el("ul","items");
+      timed.sort((a,b) => a.tm.mins - b.tm.mins || a.i - b.i);
+      for (const x of timed) ul2.appendChild(itemLi(x.b, x.tm, null, 0));
+      sect.appendChild(ul2);
+      for (const b of s.blocks) if (b.kind === "p") sect.appendChild(noteBlk(b));
+    } else {                                             // 파일에 적힌 순서 그대로
+      const parts = [];                                  // 이어지는 항목은 한 묶음으로 모아둔다
+      for (const b of s.blocks){
+        const last = parts[parts.length-1];
+        if (b.kind === "p") parts.push({ p:b });
+        else if (last && last.items) last.items.push(b);
+        else parts.push({ items:[b] });
+      }
+      for (const part of parts){
+        if (part.p){ sect.appendChild(noteBlk(part.p)); continue; }
+        const ul = el("ul","items");
+        part.items.forEach((b,i) => ul.appendChild(itemLi(b, null, part.items, i)));
+        sect.appendChild(ul);
+      }
+    }
+    c.appendChild(sect);
   }
 
+  const nkeyNew = path + "::newnote";
   if (S.open === path+"::new")
     c.appendChild(inputRow("할 일", v => mutate(path, {k:"add", s:v}, `plan ${d} ${t}`)));
+  else if (S.open === nkeyNew)
+    c.appendChild(noteEdit("", {
+      save: v => { S.open=null; mutate(path, {k:"addNote", s:v}, `memo ${d} ${t}`); },
+      del: () => { S.open=null; render(); },
+    }));
   else {
+    const foot = el("div","cardfoot");
     const ai = el("button","additem"); ai.textContent = "+ 항목";
     ai.onclick = () => { S.open = path+"::new"; render(); };
-    c.appendChild(ai);
+    const an = el("button","additem"); an.textContent = "+ 메모";
+    an.onclick = () => { S.open = nkeyNew; S.focusEdit = true; render(); };
+    foot.append(ai, an);
+    c.appendChild(foot);
   }
-  if (S.raw.has(path)){ const pre = el("pre","raw"); pre.textContent = rec.text; c.appendChild(pre); }
   return c;
 }
 
@@ -936,7 +1187,7 @@ function render(){
   }
 
   vh.appendChild(el("span","spacer"));
-  const xb = el("button","rawbtn");
+  const xb = el("button","plainbtn");
   xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
   xb.onclick = () => {
     S.exportOpen = !S.exportOpen;
