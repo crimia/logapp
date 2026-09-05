@@ -26,7 +26,8 @@
   .nav{font:inherit;font-size:15px;color:var(--muted);background:none;border:0;padding:0 5px;cursor:pointer}
   .nav:hover{color:var(--ink)}
   .bar .spacer{flex:1}
-  .status{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .status{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap;
+          min-width:0;overflow:hidden;text-overflow:ellipsis}
   .status.err{color:#a33}
   .gear{font:inherit;font-size:14px;background:none;border:0;color:var(--muted);cursor:pointer;padding:0 2px}
   .gear:hover{color:var(--ink)}
@@ -121,6 +122,49 @@
                    color:var(--ink);background:none;border:0;padding:0;cursor:pointer}
   .datehead .dow2{font-size:11.5px;color:var(--muted)}
 
+  /* 대기(오프라인 큐) 표시 */
+  .pending{font:inherit;font-family:var(--mono);font-size:10.5px;color:#8a6a1d;
+           background:none;border:0;padding:0 2px;cursor:pointer;white-space:nowrap}
+  .pending:hover{color:var(--ink)}
+
+  /* 패널 (내보내기 · 주제) */
+  .panel{background:var(--surface);border:1px solid var(--rule-soft);border-radius:4px;padding:11px 13px 13px}
+  .phead{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+  .phead h3{margin:0;font-size:12.5px;font-weight:620;color:var(--ink)}
+  .phead .sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .phead .spacer{flex:1}
+  .pbtn{font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;border:1px solid var(--rule);
+        background:var(--surface);color:var(--ink);border-radius:3px}
+  .pbtn:hover{border-color:var(--ink)}
+  .pbtn.solid{border-color:var(--ink);background:var(--ink);color:#fff}
+  .pbtn:disabled{opacity:.4;cursor:default;border-color:var(--rule)}
+  .pnote{font-size:11.5px;color:var(--muted);line-height:1.55;margin:9px 0 0}
+  .pnote.warn{color:#a33}
+  pre.export{max-height:44vh;overflow:auto;white-space:pre;word-break:normal;margin-top:0}
+
+  ul.tlist{list-style:none;margin:0 0 10px;padding:0}
+  ul.tlist li{display:flex;align-items:center;gap:9px;padding:6px 0;border-top:1px solid var(--rule-soft)}
+  ul.tlist .sw{flex:0 0 auto;width:9px;height:9px;border-radius:1px;background:currentColor}
+  ul.tlist .nm{flex:1;font-size:14px;color:var(--ink)}
+  ul.tlist .none{font-size:13px;color:var(--muted)}
+  .hidebtn{font:inherit;font-size:11.5px;color:var(--muted);background:none;border:0;
+           padding:3px 6px;cursor:pointer;border-radius:3px}
+  .hidebtn:hover{color:#a33;background:var(--paper)}
+
+  /* 항목 편집 (길게 누르기) */
+  .txt{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+  .row.holding{background:var(--paper);border-radius:3px}
+  .edit{display:flex;gap:6px;align-items:center;margin:5px 0 6px 24px}
+  .edit input{flex:1;min-width:0;font:inherit;font-size:13.5px;padding:5px 8px;
+              border:1px solid var(--ink);border-radius:3px;background:var(--surface);color:var(--ink)}
+  .edit .save{font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer;
+              border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
+  .delbtn{font:inherit;font-size:11px;color:var(--muted);background:none;
+          border:1px solid var(--rule);border-radius:3px;padding:4px 6px;cursor:pointer}
+  .delbtn:hover{color:#fff;background:#a33;border-color:#a33}
+
+  .viewhead .spacer{flex:1}
+
   /* setup */
   .setup{max-width:400px;margin:0 auto;padding:48px 22px}
   .setup h1{font-size:19px;font-weight:640;margin:0 0 6px;letter-spacing:-.01em}
@@ -177,17 +221,19 @@ async function why(r){
   return `${r.status} ${m}`;
 }
 
+const httpErr = async r => Object.assign(new Error(await why(r)), { status: r.status });
+
 async function ghList(dir){
   const r = await fetch(repoURL(dir) + "?ref=" + CFG.branch, { headers: hdr() });
   if (r.status === 404) return [];
-  if (!r.ok) throw new Error(await why(r));
+  if (!r.ok) throw await httpErr(r);
   const j = await r.json();
   return Array.isArray(j) ? j : [];
 }
 async function ghRead(path){
   const r = await fetch(repoURL(path) + "?ref=" + CFG.branch, { headers: hdr() });
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error(await why(r));
+  if (!r.ok) throw await httpErr(r);
   const j = await r.json();
   return { text: b64d(j.content), sha: j.sha };
 }
@@ -199,7 +245,7 @@ async function ghWrite(path, text, sha, msg){
     headers: { ...hdr(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw Object.assign(new Error(await why(r)), { status: r.status });
+  if (!r.ok) throw await httpErr(r);
   return (await r.json()).content.sha;
 }
 
@@ -209,12 +255,16 @@ const S = {
   view:"date", ym:TODAY.slice(0,7), date:TODAY, topic:null,
   topics:[], store:{}, present:new Set(),
   raw:new Set(), open:null, status:"", err:false, loading:true,
+  exportOpen:false, topicsOpen:false, topicMsg:"",
 };
 const pad  = n => String(n).padStart(2,"0");
 const DOW  = ["일","월","화","수","목","금","토"];
 const dow  = d => DOW[new Date(d+"T00:00:00").getDay()];
 const nfc  = s => s.normalize("NFC");
 const cellPath = (d,t) => `${LOGDIR}/${d.slice(0,7)}/${d}__${nfc(t)}.md`;
+const cellName = (d,t) => `${d}__${nfc(t)}`;
+const TOPICS_PATH = "topics.json";
+const DEFAULT_TOPICS = ["운동","스케쥴","사주"];
 const daysIn = ym => new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
 const tcolor = t => `var(--c${S.topics.indexOf(t) % 6})`;
 const TEMPLATE = (d,t) => `---\ndate: ${d}\ntopic: ${t}\n---\n## 계획\n- [ ] `;
@@ -222,14 +272,33 @@ const TEMPLATE = (d,t) => `---\ndate: ${d}\ntopic: ${t}\n---\n## 계획\n- [ ] `
 function setStatus(msg, err){ S.status = msg; S.err = !!err; paintStatus(); }
 function paintStatus(){
   const e = document.getElementById("status");
-  if (e){ e.textContent = S.status; e.className = "status" + (S.err ? " err" : ""); }
+  if (e){ e.textContent = S.status; e.title = S.status; e.className = "status" + (S.err ? " err" : ""); }
+  const q = document.getElementById("pending");
+  if (q){
+    const n = QUEUE.length;
+    q.hidden = !n && navigator.onLine;
+    q.textContent = n ? `대기 ${n}` : "오프라인";
+    q.title = n ? "저장 못 한 편집입니다. 누르면 지금 다시 보냅니다." : "연결이 없습니다.";
+  }
 }
 
 /* ═══ 로드 ═══════════════════════════════════════════ */
+function readTopics(text){
+  try { const j = JSON.parse(text); if (Array.isArray(j)) return j.map(nfc); } catch(e){}
+  return DEFAULT_TOPICS.slice();       // 파일이 없거나 깨졌을 때만 기본값. 빈 목록은 빈 목록이다
+}
 async function loadTopics(){
-  const f = await ghRead("topics.json");
-  if (f){ try { const j = JSON.parse(f.text); if (Array.isArray(j) && j.length) return j.map(nfc); } catch(e){} }
-  return ["운동","스케쥴","사주"];
+  const f = await ghRead(TOPICS_PATH);
+  S.store[TOPICS_PATH] = { text: f ? f.text : "", sha: f ? f.sha : null };
+  return readTopics(f ? f.text : "");
+}
+// topics.json이 바뀌면 화면 목록도 따라간다. 색은 여전히 순서대로다.
+function syncTopics(){
+  const rec = S.store[TOPICS_PATH];
+  if (!rec) return;
+  S.topics = readTopics(rec.text);
+  if (!S.topic || !S.topics.includes(S.topic)) S.topic = S.topics[0] || null;
+  if (S.view === "topic" && !S.topic) S.view = "date";
 }
 async function loadMonth(ym){
   S.loading = true; setStatus("불러오는 중");
@@ -271,39 +340,123 @@ function parse(raw){
 }
 
 /* ═══ 줄 단위 편집 ═══════════════════════════════════
-   파싱 결과를 되돌려 쓰지 않는다. 해당 줄만 손댄다.   */
-const opToggle = ln => text => {
+   파싱 결과를 되돌려 쓰지 않는다. 해당 줄만 손댄다.
+   연산은 그냥 객체다. 그래야 오프라인 큐에 실린다.   */
+const isItem   = l => /^- \[[ xX]\]/.test(l || "");
+const itemText = l => { const m = (l || "").match(/^- \[[ xX]\]\s?(.*)$/); return m ? m[1] : null; };
+// 항목에 딸린 실행 코멘트의 끝(다음 줄 번호)
+const cmtEnd = (L, ln) => { let at = ln + 1; while (at < L.length && /^\s{2,}- /.test(L[at])) at++; return at; };
+// 큐에 쌓인 연산이 뒤늦게 다른 텍스트에 닿을 수 있다. 그 줄이 그대로일 때만 손댄다.
+const same = (L, ln, prev) => prev == null || itemText(L[ln]) === prev;
+
+function applyOp(o, text){
   const L = text.split("\n");
-  if (!/^- \[[ xX]\]/.test(L[ln] || "")) return text;
-  L[ln] = /^- \[ \]/.test(L[ln]) ? L[ln].replace("- [ ]","- [x]") : L[ln].replace(/^- \[[xX]\]/,"- [ ]");
-  return L.join("\n");
-};
-const opComment = (ln, s) => text => {
-  const L = text.split("\n");
-  let at = ln + 1;
-  while (at < L.length && /^\s{2,}- /.test(L[at])) at++;
-  L.splice(at, 0, "    - " + s);
-  return L.join("\n");
-};
-const opAddItem = s => text => {
-  const L = text.split("\n");
-  let at = L.length;
-  for (let i = L.length - 1; i >= 0; i--)
-    if (/^- \[[ xX]\]/.test(L[i]) || /^\s{2,}- /.test(L[i])){ at = i + 1; break; }
-  if (L[at-1] !== undefined && L[at-1].trim() === "- [ ]") { L[at-1] = "- [ ] " + s; return L.join("\n"); }
-  L.splice(at, 0, "- [ ] " + s);
-  return L.join("\n");
-};
+  switch (o.k){
+    case "tpl":
+      return text.trim() ? text : TEMPLATE(o.d, o.t);        // 이미 쓴 게 있으면 덮지 않는다
+
+    case "toggle":
+      if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
+      L[o.ln] = /^- \[ \]/.test(L[o.ln]) ? L[o.ln].replace("- [ ]","- [x]")
+                                        : L[o.ln].replace(/^- \[[xX]\]/,"- [ ]");
+      return L.join("\n");
+
+    case "comment":
+      if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
+      L.splice(cmtEnd(L, o.ln), 0, "    - " + o.s);
+      return L.join("\n");
+
+    case "edit": {                                           // 계획 줄만. 체크 상태와 아래 코멘트는 그대로
+      const m = (L[o.ln] || "").match(/^- \[([ xX])\]/);
+      if (!m || !same(L, o.ln, o.prev)) return text;
+      L[o.ln] = `- [${m[1]}] ` + o.s;
+      return L.join("\n");
+    }
+
+    case "del":                                              // 딸린 코멘트까지 같이
+      if (!isItem(L[o.ln]) || !same(L, o.ln, o.prev)) return text;
+      L.splice(o.ln, cmtEnd(L, o.ln) - o.ln);
+      return L.join("\n");
+
+    case "add": {
+      let at = L.length;
+      for (let i = L.length - 1; i >= 0; i--)
+        if (isItem(L[i]) || /^\s{2,}- /.test(L[i])){ at = i + 1; break; }
+      if (L[at-1] !== undefined && L[at-1].trim() === "- [ ]"){ L[at-1] = "- [ ] " + o.s; return L.join("\n"); }
+      L.splice(at, 0, "- [ ] " + o.s);
+      return L.join("\n");
+    }
+
+    case "topicAdd":                                         // topics.json만 건드린다
+    case "topicHide": {                                      // 숨김 = 목록에서 빼기. md 파일은 그대로 둔다
+      let a = readTopics(text);
+      if (o.k === "topicAdd"){ if (!a.includes(o.name)) a.push(o.name); }
+      else a = a.filter(x => x !== o.name);
+      return JSON.stringify(a) + "\n";
+    }
+  }
+  return text;
+}
+
+/* ═══ 오프라인 큐 ════════════════════════════════════
+   저장에 실패한 편집을 연산 그대로 쌓아 둔다.
+   다시 보낼 때는 늘 최신 파일을 읽어 그 위에 얹는다.  */
+const QKEY = "celllog.queue";
+let QUEUE = [];
+try { const j = JSON.parse(localStorage.getItem(QKEY) || "[]"); if (Array.isArray(j)) QUEUE = j; } catch(e){}
+const saveQueue = () => { try { localStorage.setItem(QKEY, JSON.stringify(QUEUE)); } catch(e){} };
+// 연결 문제만 쌓는다. 토큰·권한 문제는 다시 보내도 소용없으니 그대로 알린다.
+const retryable = e => !e.status || e.status === 409 || e.status === 422 || e.status === 429 || e.status >= 500;
+const queuedFor = p => QUEUE.some(j => j.path === p);
+function enqueue(path, op, msg){
+  QUEUE.push({ path, op, msg, at: Date.now() });
+  saveQueue(); paintStatus();
+}
+
+let flushing = false;
+async function flushQueue(){
+  if (flushing || !QUEUE.length || !navigator.onLine || !CFG) { paintStatus(); return; }
+  flushing = true;
+  setStatus("밀린 편집 보내는 중");
+  try {
+    while (QUEUE.length){
+      const job = QUEUE[0];
+      let fresh;
+      try { fresh = await ghRead(job.path); }
+      catch(e){ setStatus(retryable(e) ? "연결되면 보냄" : e.message, !retryable(e)); return; }
+      const base = fresh ? fresh.text : "";
+      const next = applyOp(job.op, base);
+      if (next === base){ QUEUE.shift(); saveQueue(); continue; }   // 이미 반영됐거나 대상이 사라졌다
+      try {
+        const sha = await ghWrite(job.path, next, fresh ? fresh.sha : null, job.msg);
+        S.store[job.path] = { text: next, sha };
+        S.present.add(job.path);
+        QUEUE.shift(); saveQueue(); paintStatus();
+      } catch(e){
+        setStatus(retryable(e) ? "연결되면 보냄" : e.message, !retryable(e));
+        return;                                                    // 큐는 그대로 둔다
+      }
+    }
+    setStatus("저장됨");
+  } finally { flushing = false; paintStatus(); render(); }
+}
 
 /* ═══ 저장 (커밋) ════════════════════════════════════ */
 const chains = {};
 function mutate(path, op, msg){
   path = nfc(path);
   const rec = S.store[path] || { text:"", sha:null };
-  S.store[path] = { text: op(rec.text), sha: rec.sha };   // 낙관적 반영
+  S.store[path] = { text: applyOp(op, rec.text), sha: rec.sha };   // 낙관적 반영
   S.present.add(path);
   render();
   const run = async () => {
+    // 이미 밀린 편집이 있는 파일이면 순서를 지켜 큐로 보낸다
+    if (!navigator.onLine || queuedFor(path)){
+      enqueue(path, op, msg);
+      setStatus(navigator.onLine ? "대기열에 넣음" : "오프라인");
+      await flushQueue();
+      return;
+    }
     setStatus("저장 중");
     const cur = S.store[path];
     try {
@@ -312,14 +465,21 @@ function mutate(path, op, msg){
       setStatus("저장됨");
     } catch(e){
       if (e.status === 409 || e.status === 422){
-        const fresh = await ghRead(path);            // 밖에서 바뀐 경우
-        if (fresh){
-          const merged = op(fresh.text);
-          const sha = await ghWrite(path, merged, fresh.sha, msg);
-          S.store[path] = { text: merged, sha };
-          setStatus("저장됨");
+        try {
+          const fresh = await ghRead(path);          // 밖에서 바뀐 경우
+          if (fresh){
+            const merged = applyOp(op, fresh.text);
+            const sha = await ghWrite(path, merged, fresh.sha, msg);
+            S.store[path] = { text: merged, sha };
+            setStatus("저장됨");
+          }
+        } catch(e2){
+          if (retryable(e2)){ enqueue(path, op, msg); setStatus("연결되면 보냄"); }
+          else setStatus(e2.message, true);
         }
-      } else { setStatus(e.message, true); }
+      } else if (retryable(e)){
+        enqueue(path, op, msg); setStatus("연결되면 보냄");
+      } else setStatus(e.message, true);
     }
     render();
   };
@@ -385,6 +545,61 @@ function inputRow(ph, done){
   return w;
 }
 
+// 항목 편집 줄. 삭제는 여기 안에 작게 둔다.
+function editRow(initial, onSave, onDel){
+  const w = el("div","edit");
+  const i = el("input"); i.value = initial; i.setAttribute("aria-label","계획 수정");
+  const b = el("button","save"); b.textContent = "저장";
+  const x = el("button","delbtn"); x.textContent = "삭제"; x.title = "코멘트까지 지웁니다";
+  const go = () => {
+    const v = i.value.trim();
+    if (v && v !== initial) onSave(v);
+    else { S.open = null; render(); }
+  };
+  b.onclick = go;
+  x.onclick = onDel;                                   // 확인창 없이
+  i.onkeydown = e => { if (e.key==="Enter") go(); if (e.key==="Escape"){ S.open=null; render(); } };
+  w.append(i,b,x);
+  setTimeout(() => { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 0);
+  return w;
+}
+
+// 길게 눌러 편집창을 연 뒤, 손을 뗄 때 따라오는 탭 한 번만 삼킨다.
+// 그게 없으면 방금 연 입력칸이 곧바로 포커스를 잃는다. 해제 함수를 돌려준다.
+function swallowTrailingTap(){
+  const evs = ["mousedown","mouseup","click"];
+  const eat = ev => {
+    ev.preventDefault(); ev.stopPropagation();
+    if (ev.type === "click") off();                    // 탭 한 묶음을 삼켰으면 거기서 끝
+    else if (ev.type === "mouseup") setTimeout(off, 60);   // click이 안 따라오는 경우까지
+  };
+  const off = () => { clearTimeout(guard); for (const t of evs) document.removeEventListener(t, eat, true); };
+  for (const t of evs) document.addEventListener(t, eat, true);
+  const guard = setTimeout(off, 5000);                 // 아무것도 안 오는 경우의 안전장치
+  return off;
+}
+
+// 길게 누르기. 버튼 위에서는 무시한다.
+// 손을 떼기 전에 화면을 다시 그리므로, 떼는 신호는 떨어져 나간 이 노드로 온다.
+function attachHold(node, fire){
+  let timer = null, sx = 0, sy = 0, disarm = null;
+  const clear = () => { clearTimeout(timer); timer = null; node.classList.remove("holding"); };
+  node.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    sx = e.clientX; sy = e.clientY;
+    node.classList.add("holding");
+    timer = setTimeout(() => { clear(); disarm = swallowTrailingTap(); fire(); }, 480);
+  });
+  node.addEventListener("pointermove", e => {
+    if (timer && (Math.abs(e.clientX-sx) > 8 || Math.abs(e.clientY-sy) > 8)) clear();
+  });
+  const end = () => {
+    clear();
+    if (disarm){ const d = disarm; disarm = null; setTimeout(d, 80); }
+  };
+  for (const t of ["pointerup","pointercancel","pointerleave"]) node.addEventListener(t, end);
+}
+
 function card(d,t){
   const path = cellPath(d,t), rec = S.store[path];
 
@@ -394,7 +609,7 @@ function card(d,t){
     const b = el("button"); b.textContent = "쓰기";
     b.onclick = () => {
       S.store[path] = { text:"", sha:null };
-      mutate(path, () => TEMPLATE(d,t), `add ${d} ${t}`);
+      mutate(path, {k:"tpl", d, t}, `add ${d} ${t}`);
       S.open = path + "::new";
     };
     e.appendChild(b); return e;
@@ -435,12 +650,15 @@ function card(d,t){
     box.innerHTML = `<svg viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2.2"
       stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 L5 8.6 L9.5 3.6"/></svg>`;
     box.setAttribute("aria-pressed", b.done);
-    box.onclick = () => mutate(path, opToggle(b.ln), `${b.done?"uncheck":"check"} ${d} ${t}`);
+    box.onclick = () => mutate(path, {k:"toggle", ln:b.ln, prev:b.text}, `${b.done?"uncheck":"check"} ${d} ${t}`);
 
-    const tx = el("div","txt"); tx.textContent = b.text;
+    const tx = el("div","txt"); tx.textContent = b.text; tx.title = "길게 눌러 수정";
     const ac = el("button","addc"); ac.textContent = "+"; ac.title = "실행 코멘트";
     ac.onclick = () => { S.open = path+"::"+b.ln; render(); };
     row.append(box, tx, ac); li.appendChild(row);
+
+    const ekey = path+"::edit::"+b.ln;
+    attachHold(row, () => { S.open = S.open === ekey ? null : ekey; render(); });
 
     if (b.cmts.length){
       const ul = el("ul","cmts");
@@ -448,12 +666,18 @@ function card(d,t){
       li.appendChild(ul);
     }
     if (S.open === path+"::"+b.ln)
-      li.appendChild(inputRow("실제로는…", v => { S.open=null; mutate(path, opComment(b.ln, v), `note ${d} ${t}`); }));
+      li.appendChild(inputRow("실제로는…", v => {
+        S.open = null; mutate(path, {k:"comment", ln:b.ln, prev:b.text, s:v}, `note ${d} ${t}`);
+      }));
+    if (S.open === ekey)
+      li.appendChild(editRow(b.text,
+        v  => { S.open=null; mutate(path, {k:"edit", ln:b.ln, prev:b.text, s:v}, `edit ${d} ${t}`); },
+        () => { S.open=null; mutate(path, {k:"del",  ln:b.ln, prev:b.text},     `drop ${d} ${t}`); }));
     list.appendChild(li);
   }
 
   if (S.open === path+"::new")
-    c.appendChild(inputRow("할 일", v => mutate(path, opAddItem(v), `plan ${d} ${t}`)));
+    c.appendChild(inputRow("할 일", v => mutate(path, {k:"add", s:v}, `plan ${d} ${t}`)));
   else {
     const ai = el("button","additem"); ai.textContent = "+ 항목";
     ai.onclick = () => { S.open = path+"::new"; render(); };
@@ -461,6 +685,124 @@ function card(d,t){
   }
   if (S.raw.has(path)){ const pre = el("pre","raw"); pre.textContent = rec.text; c.appendChild(pre); }
   return c;
+}
+
+/* ═══ 내보내기 ═══════════════════════════════════════
+   이번 달을 텍스트 한 덩어리로. 주제뷰에서는 그 주제만. */
+function exportMonth(){
+  const N = daysIn(S.ym);
+  const topics = (S.view === "topic" && S.topic) ? [S.topic] : S.topics;
+  const out = [];
+  let cells = 0, missing = 0;
+  for (let n=1;n<=N;n++){
+    const d = `${S.ym}-${pad(n)}`;
+    for (const t of topics){
+      const p = cellPath(d,t);
+      if (!S.present.has(p)) continue;
+      const rec = S.store[p];
+      out.push("=== " + cellName(d,t));
+      if (rec){ out.push(rec.text.replace(/\s+$/,"")); cells++; }
+      else    { out.push("(불러오지 못했습니다)"); missing++; }
+      out.push("");
+    }
+  }
+  return { text: out.join("\n").replace(/\n+$/,"\n"), cells, missing };
+}
+
+async function copyText(s){
+  try { await navigator.clipboard.writeText(s); return true; } catch(e){}
+  try {                                            // 클립보드 API가 막힌 경우
+    const ta = document.createElement("textarea");
+    ta.value = s; ta.setAttribute("readonly","");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, s.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch(e){ return false; }
+}
+
+function exportPanel(){
+  const { text, cells, missing } = exportMonth();
+  const p = el("div","panel");
+  const h = el("div","phead");
+  const t = el("h3"); t.textContent = "내보내기";
+  const sub = el("span","sub");
+  sub.textContent = `${+S.ym.slice(5)}월` + (S.view === "topic" && S.topic ? ` · ${S.topic}` : "") + ` · ${cells}칸`;
+  const cp = el("button","pbtn solid"); cp.textContent = "복사";
+  cp.disabled = !text.trim();
+  cp.onclick = async () => {
+    const ok = await copyText(text);
+    cp.textContent = ok ? "복사됨" : "복사 실패";
+    setTimeout(() => { cp.textContent = "복사"; }, 1400);
+  };
+  const x = el("button","pbtn"); x.textContent = "닫기";
+  x.onclick = () => { S.exportOpen = false; render(); };
+  h.append(t, sub, el("span","spacer"), cp, x);
+  p.appendChild(h);
+
+  const pre = el("pre","raw export");
+  pre.textContent = text.trim() ? text : "이번 달에는 기록이 없습니다.";
+  p.appendChild(pre);
+
+  if (missing){
+    const w = el("p","pnote warn");
+    w.textContent = `${missing}칸은 아직 불러오지 못했습니다. 잠시 뒤 다시 열어보세요.`;
+    p.appendChild(w);
+  }
+  return p;
+}
+
+/* ═══ 주제 관리 ══════════════════════════════════════
+   추가와 숨김만. 숨김은 topics.json에서 빼는 것뿐이고
+   이미 쓴 md 파일은 저장소에 그대로 남는다.          */
+function topicPanel(){
+  const p = el("div","panel");
+  const h = el("div","phead");
+  const t = el("h3"); t.textContent = "주제";
+  const x = el("button","pbtn"); x.textContent = "닫기";
+  x.onclick = () => { S.topicsOpen = false; S.topicMsg = ""; render(); };
+  h.append(t, el("span","spacer"), x);
+  p.appendChild(h);
+
+  const ul = el("ul","tlist");
+  for (const name of S.topics){
+    const li = el("li"); li.style.color = tcolor(name);
+    const nm = el("span","nm"); nm.textContent = name;
+    const hb = el("button","hidebtn"); hb.textContent = "숨기기";
+    hb.title = "목록에서만 뺍니다. 기록은 지워지지 않습니다.";
+    hb.onclick = () => { S.topicMsg = ""; mutate(TOPICS_PATH, {k:"topicHide", name}, `hide topic ${name}`); };
+    li.append(el("span","sw"), nm, hb);
+    ul.appendChild(li);
+  }
+  if (!S.topics.length){
+    const li = el("li"); const s = el("span","none");
+    s.textContent = "목록이 비었습니다."; li.appendChild(s); ul.appendChild(li);
+  }
+  p.appendChild(ul);
+
+  const w = el("div","inline"); w.style.margin = "0";
+  const i = el("input"); i.placeholder = "새 주제"; i.setAttribute("aria-label","새 주제");
+  const b = el("button"); b.textContent = "추가";
+  const go = () => {
+    const v = nfc(i.value.trim());
+    if (!v) return;
+    if (/[\/\\]/.test(v) || v.startsWith(".")){ S.topicMsg = "이름에 / \\ 는 쓸 수 없고 점으로 시작할 수 없습니다."; render(); return; }
+    if (S.topics.includes(v)){ S.topicMsg = "이미 있는 주제입니다."; render(); return; }
+    S.topicMsg = "";
+    mutate(TOPICS_PATH, {k:"topicAdd", name:v}, `add topic ${v}`);
+  };
+  b.onclick = go;
+  i.onkeydown = e => { if (e.key === "Enter") go(); };
+  w.append(i,b);
+  p.appendChild(w);
+
+  if (S.topicMsg){ const m = el("p","pnote warn"); m.textContent = S.topicMsg; p.appendChild(m); }
+  const n = el("p","pnote");
+  n.textContent = "숨기기는 topics.json에서 이름만 뺍니다. 이미 쓴 기록 파일은 그대로 남고, 같은 이름을 다시 추가하면 다시 보입니다. 색은 순서대로 자동 배정됩니다.";
+  p.appendChild(n);
+  return p;
 }
 
 function render(){
@@ -474,6 +816,8 @@ function render(){
           <button class="nav" id="next">›</button>
           <span class="spacer"></span>
           <span class="status" id="status"></span>
+          <button class="pending" id="pending" hidden></button>
+          <button class="gear" id="topics">주제</button>
           <button class="gear" id="gear">설정</button>
         </div>
         <div class="grid-scroll" id="gridScroll"><div class="grid" id="grid"></div></div>
@@ -483,24 +827,38 @@ function render(){
     </div>`;
     document.getElementById("prev").onclick = () => shiftMonth(-1);
     document.getElementById("next").onclick = () => shiftMonth(1);
+    document.getElementById("pending").onclick = () => flushQueue();
+    document.getElementById("topics").onclick = () => {
+      S.topicsOpen = !S.topicsOpen; S.topicMsg = "";
+      if (S.topicsOpen) window.scrollTo({ top:0 });
+      render();
+    };
     document.getElementById("gear").onclick = () => {
       if (confirm("설정을 지우고 다시 연결할까요? 기록은 저장소에 그대로 남습니다."))
         { localStorage.removeItem(CFG_KEY); location.reload(); }
     };
   }
 
+  syncTopics();
   document.getElementById("monthLbl").textContent = `${+S.ym.slice(5)}월`;
   paintStatus();
   drawGrid(document.getElementById("grid"));
 
   const vh = document.getElementById("viewhead"), st = document.getElementById("stack");
   vh.innerHTML = ""; st.innerHTML = "";
+  if (S.topicsOpen) st.appendChild(topicPanel());
+  if (S.exportOpen) st.appendChild(exportPanel());
 
   if (S.view === "date"){
     const n = +S.date.slice(-2);
     vh.innerHTML = `<h2>${+S.ym.slice(5)}월 ${n}일 ${dow(S.date)}요일</h2>
       <span class="sub">${S.date===TODAY ? "오늘" : ""}</span>`;
     for (const t of S.topics) st.appendChild(card(S.date, t));
+    if (!S.topics.length){
+      const e = el("div","empty");
+      e.innerHTML = `<span class="msg">주제가 없습니다. 위 ‘주제’에서 추가하세요.</span>`;
+      st.appendChild(e);
+    }
   } else {
     vh.innerHTML = `<h2>${S.topic}</h2><span class="sub">${+S.ym.slice(5)}월</span>`;
     const N = daysIn(S.ym);
@@ -521,10 +879,20 @@ function render(){
       e.innerHTML = `<span class="msg">이번 달 기록이 없습니다. 위 그리드에서 날짜를 고르세요.</span>`;
       st.appendChild(e);
     }
-    const a = st.querySelector(`[data-date="${S.date}"]`);
+    const a = (S.topicsOpen || S.exportOpen) ? null : st.querySelector(`[data-date="${S.date}"]`);
     if (a) requestAnimationFrame(() =>
       window.scrollTo({ top: a.getBoundingClientRect().top + window.scrollY - 118 }));
   }
+
+  vh.appendChild(el("span","spacer"));
+  const xb = el("button","rawbtn");
+  xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
+  xb.onclick = () => {
+    S.exportOpen = !S.exportOpen;
+    if (S.exportOpen) window.scrollTo({ top:0 });
+    render();
+  };
+  vh.appendChild(xb);
 
   const sc = document.getElementById("gridScroll");
   const sel = sc.querySelector(".dayhead.sel") || sc.querySelector(".dayhead.is-today");
@@ -578,12 +946,20 @@ async function boot(){
     S.topics = await loadTopics();
     S.topic  = S.topics[0];
     render();
+    await flushQueue();              // 지난번에 못 보낸 편집부터
     await loadMonth(S.ym);
   } catch(e){
     render();
     setStatus(e.message, true);
   }
 }
+
+// 온라인으로 돌아오면 알아서 다시 보낸다
+window.addEventListener("online",  () => { setStatus(""); flushQueue(); });
+window.addEventListener("offline", () => paintStatus());
+document.addEventListener("visibilitychange", () => { if (!document.hidden) flushQueue(); });
+setInterval(() => { if (QUEUE.length) flushQueue(); }, 30000);
+
 boot();
 </script>
 </body>
