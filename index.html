@@ -85,6 +85,21 @@
   .sect > .grouplab:first-of-type{margin-top:2px}
   .tchip{font-family:var(--mono);font-size:12px;color:var(--muted);margin-right:7px;
          font-variant-numeric:tabular-nums}
+  .mdh{font-size:12.5px;font-weight:640;color:var(--ink);margin:10px 0 4px}
+  .notebody > .mdh:first-child{margin-top:0}
+  .mdq{margin:8px 0;padding:1px 0 1px 10px;border-left:2px solid var(--rule);
+       color:var(--ink);font-size:14px;line-height:1.55;white-space:pre-wrap}
+  ul.mdlist{list-style:none;margin:6px 0;padding:0}
+  ul.mdlist li{position:relative;padding-left:13px;font-size:14px;line-height:1.55}
+  ul.mdlist li::before{content:"·";position:absolute;left:3px;color:var(--muted)}
+  .mdtablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:9px 0}
+  table.mdtable{border-collapse:collapse;font-family:var(--mono);font-size:12px;
+                white-space:nowrap;font-variant-numeric:tabular-nums}
+  table.mdtable th,table.mdtable td{border:1px solid var(--rule-soft);padding:4px 8px;text-align:right}
+  table.mdtable th{background:var(--paper);color:var(--muted);font-weight:600}
+  table.mdtable th:first-child,table.mdtable td:first-child{text-align:left}
+  .note code,.mdq code,.mdlist code{font-family:var(--mono);font-size:12.5px;
+        background:var(--paper);padding:1px 4px;border-radius:3px}
   .noteblk{margin:0 0 2px}
   .noterow{display:flex;align-items:flex-start;gap:6px}
   .notebody{flex:1;min-width:0}
@@ -838,6 +853,88 @@ function itemTime(s){
   return { mins: +m[1] * 60 + +m[2], label: s.slice(0, s.length - m[3].length).trim(), rest: m[3] };
 }
 
+/* ═══ 메모 안의 마크다운 ═══════════════════════════
+   문자열을 innerHTML로 넣지 않는다. 노드로 만든다.  */
+const MD_INLINE = /\*\*(.+?)\*\*|`([^`]+)`/g;
+function inlineMd(node, s){
+  let i = 0, m;
+  MD_INLINE.lastIndex = 0;
+  while ((m = MD_INLINE.exec(s))){
+    if (m.index > i) node.appendChild(document.createTextNode(s.slice(i, m.index)));
+    if (m[1] != null){ const b = el("strong"); b.textContent = m[1]; node.appendChild(b); }
+    else { const c = el("code"); c.textContent = m[2]; node.appendChild(c); }
+    i = m.index + m[0].length;
+  }
+  if (i < s.length) node.appendChild(document.createTextNode(s.slice(i)));
+  return node;
+}
+const tRow = l => /^\s*\|.*\|\s*$/.test(l);
+const tSep = l => /^\s*\|[\s:|-]+\|\s*$/.test(l);
+const tCells = l => l.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+const isBullet = l => /^\s*[-*·]\s+/.test(l);
+
+function renderMd(host, text){
+  const L = text.split("\n");
+  const buf = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const p = el("p","note");
+    inlineMd(p, buf.join("\n"));
+    host.appendChild(p);
+    buf.length = 0;
+  };
+  let i = 0;
+  while (i < L.length){
+    const l = L[i];
+    if (!l.trim()){ flush(); i++; continue; }
+
+    let m;
+    if ((m = l.match(/^\s*(#{1,6})\s+(.*)$/))){                    // 소제목
+      flush();
+      host.appendChild(inlineMd(el("div","mdh"), m[2]));
+      i++; continue;
+    }
+    if (tRow(l) && i + 1 < L.length && tSep(L[i+1])){               // 표
+      flush();
+      const head = tCells(l);
+      i += 2;
+      const rows = [];
+      while (i < L.length && tRow(L[i])) rows.push(tCells(L[i++]));
+      const t = el("table","mdtable");
+      const thead = el("thead"), hr = el("tr");
+      for (const c of head) hr.appendChild(inlineMd(el("th"), c));
+      thead.appendChild(hr); t.appendChild(thead);
+      const tb = el("tbody");
+      for (const r of rows){
+        const tr = el("tr");
+        for (const c of r) tr.appendChild(inlineMd(el("td"), c));
+        tb.appendChild(tr);
+      }
+      t.appendChild(tb);
+      const wrap = el("div","mdtablewrap"); wrap.appendChild(t);     // 좁으면 가로로 민다
+      host.appendChild(wrap);
+      continue;
+    }
+    if (l.startsWith(">")){                                          // 인용
+      flush();
+      const q = [];
+      while (i < L.length && L[i].startsWith(">")) q.push(L[i++].replace(/^>\s?/, ""));
+      host.appendChild(inlineMd(el("blockquote","mdq"), q.join("\n")));
+      continue;
+    }
+    if (isBullet(l)){                                                // 목록
+      flush();
+      const ul = el("ul","mdlist");
+      while (i < L.length && isBullet(L[i]))
+        ul.appendChild(inlineMd(el("li"), L[i++].replace(/^\s*[-*·]\s+/, "")));
+      host.appendChild(ul);
+      continue;
+    }
+    buf.push(l); i++;
+  }
+  flush();
+}
+
 // 메모 편집창. 여러 줄이라 textarea를 쓴다.
 function noteEdit(initial, on){
   const w = el("div","editwrap");
@@ -1003,7 +1100,7 @@ function card(d,t){
     const wrap = el("div","noteblk");
     const row = el("div","noterow");
     const body = el("div","notebody");
-    for (const p of ps){ const e = el("p","note"); e.textContent = p.text; body.appendChild(e); }
+    renderMd(body, raw);                                   // 고칠 때는 원문 그대로 연다
     const eb = el("button","addc editb"); eb.textContent = "⋯";
     eb.title = "메모 수정·삭제"; eb.setAttribute("aria-label", "메모 수정");
     eb.onclick = () => {
