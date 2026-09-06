@@ -48,8 +48,8 @@
   .dayhead.sel{background:#e3e9ee}
   .rowlabel{font:inherit;font-size:12px;color:var(--muted);border:0;
             border-right:1px solid var(--rule-soft);text-align:left;
-            padding:0 8px 0 14px;cursor:pointer;height:26px;
-            max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+            padding:0 7px 0 12px;cursor:pointer;height:26px;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rowlabel.sel{color:var(--ink);font-weight:620}
   .cell{height:26px;border:0;background:none;cursor:pointer;padding:0;
         display:flex;align-items:center;justify-content:center}
@@ -161,7 +161,8 @@
   pre.export{max-height:44vh;overflow:auto;white-space:pre;word-break:normal;margin-top:0}
 
   ul.tlist{list-style:none;margin:0 0 10px;padding:0}
-  ul.tlist li{display:flex;align-items:center;gap:9px;padding:6px 0;border-top:1px solid var(--rule-soft)}
+  ul.tlist li{display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--rule-soft)}
+  ul.tlist .movebtn{min-width:28px;padding:4px 6px;text-align:center}
   ul.tlist .sw{flex:0 0 auto;width:9px;height:9px;border-radius:1px;background:currentColor}
   ul.tlist .nm{flex:1;font-size:14px;color:var(--ink)}
   ul.tlist .none{font-size:13px;color:var(--muted)}
@@ -483,6 +484,14 @@ function applyOp(o, text){
       else a = a.filter(x => x !== o.name);
       return JSON.stringify(a) + "\n";
     }
+
+    case "topicMove": {                                      // 목록 차례. 색과 줄 순서가 여기서 나온다
+      const a = readTopics(text);
+      const i = a.indexOf(o.name), j = i + o.dir;
+      if (i < 0 || j < 0 || j >= a.length) return text;
+      a.splice(j, 0, a.splice(i, 1)[0]);
+      return JSON.stringify(a) + "\n";
+    }
   }
   return text;
 }
@@ -634,9 +643,19 @@ function cellState(d,t){
   return items.some(l => /^- \[ \]/.test(l)) ? "open" : "full";
 }
 
+// 첫 칸 너비는 가장 긴 주제 이름에 맞춘다. 글자를 재서 정한다.
+let _mctx = null;
+function labelWidth(){
+  if (!S.topics.length) return 48;
+  if (!_mctx) _mctx = document.createElement("canvas").getContext("2d");
+  _mctx.font = `12px ${getComputedStyle(document.body).fontFamily}`;
+  const w = Math.max(...S.topics.map(t => _mctx.measureText(t).width));
+  return Math.round(Math.min(120, Math.max(48, w + 21)));   // 좌우 여백 19 + 여유
+}
+
 function drawGrid(g){
   const N = daysIn(S.ym);
-  g.style.gridTemplateColumns = `48px repeat(${N}, 24px)`;
+  g.style.gridTemplateColumns = `${labelWidth()}px repeat(${N}, 24px)`;
   g.innerHTML = "";
   g.appendChild(el("div","corner"));
   for (let n=1;n<=N;n++){
@@ -1068,15 +1087,22 @@ function topicPanel(){
   p.appendChild(h);
 
   const ul = el("ul","tlist");
-  for (const name of S.topics){
+  S.topics.forEach((name, i) => {
     const li = el("li"); li.style.color = tcolor(name);
     const nm = el("span","nm"); nm.textContent = name;
+    const mk = (dir, label) => {
+      const b = el("button","movebtn"); b.textContent = label;
+      b.title = "차례를 바꿉니다. 색도 차례를 따라갑니다.";
+      b.disabled = dir < 0 ? i === 0 : i === S.topics.length - 1;
+      b.onclick = () => { S.topicMsg = ""; mutate(TOPICS_PATH, {k:"topicMove", name, dir}, `move topic ${name}`); };
+      return b;
+    };
     const hb = el("button","hidebtn"); hb.textContent = "숨기기";
     hb.title = "목록에서만 뺍니다. 기록은 지워지지 않습니다.";
     hb.onclick = () => { S.topicMsg = ""; mutate(TOPICS_PATH, {k:"topicHide", name}, `hide topic ${name}`); };
-    li.append(el("span","sw"), nm, hb);
+    li.append(el("span","sw"), nm, mk(-1,"↑"), mk(1,"↓"), hb);
     ul.appendChild(li);
-  }
+  });
   if (!S.topics.length){
     const li = el("li"); const s = el("span","none");
     s.textContent = "목록이 비었습니다."; li.appendChild(s); ul.appendChild(li);
