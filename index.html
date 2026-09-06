@@ -87,7 +87,8 @@
          font-variant-numeric:tabular-nums}
   .noteblk{margin:0 0 2px}
   .noterow{display:flex;align-items:flex-start;gap:6px}
-  .noterow .note{flex:1}
+  .notebody{flex:1;min-width:0}
+  .notebody .note + .note{margin-top:7px}
   .noteta{width:100%;font:inherit;font-size:13.5px;line-height:1.55;padding:7px 8px;
           border:1px solid var(--ink);border-radius:3px;background:var(--surface);
           color:var(--ink);resize:vertical;box-sizing:border-box}
@@ -113,6 +114,9 @@
   .addc:hover{color:var(--ink);background:var(--paper)}
   .cmts{list-style:none;margin:3px 0 4px 14px;padding:0 0 0 10px;border-left:2px solid currentColor}
   .cmts li{font-size:13.5px;line-height:1.5;color:var(--ink);padding:1px 0}
+  .cmtrow{display:flex;align-items:flex-start;gap:6px}
+  .cmtrow .cmttx{flex:1}
+  .cmts .editwrap{margin-left:0}
 
   .inline{display:flex;gap:6px;margin:4px 0 6px 24px}
   .inline input{flex:1;font:inherit;font-size:13.5px;padding:5px 8px;min-width:0;
@@ -392,7 +396,7 @@ function parse(raw){
       blocks.push({kind:"item", done:m[1].toLowerCase()==="x", text:m[2], ln:i, cmts:[]});
     else if ((m = line.match(/^\s{2,}- (.*)$/))){
       const last = blocks[blocks.length-1];
-      if (last && last.kind === "item") last.cmts.push(m[1]);
+      if (last && last.kind === "item") last.cmts.push({ text:m[1], ln:i });
       else blocks.push({kind:"p", text:line, ln:i, end:i+1});
     } else if (line.trim()){
       // 빈 줄로 갈린 문단은 따로 센다. 그래야 문단 하나만 골라 고칠 수 있다.
@@ -471,6 +475,20 @@ function applyOp(o, text){
         if (isItem(L[i]) || /^\s{2,}- /.test(L[i])){ at = i + 1; break; }
       if (L[at-1] !== undefined && L[at-1].trim() === "- [ ]"){ L[at-1] = "- [ ] " + o.s; return L.join("\n"); }
       L.splice(at, 0, "- [ ] " + o.s);
+      return L.join("\n");
+    }
+
+    case "editCmt": {                                        // 실행 코멘트 한 줄. 들여쓰기는 그대로
+      const m = (L[o.ln] || "").match(/^(\s{2,}- )(.*)$/);
+      if (!m || m[2] !== o.prev) return text;
+      L[o.ln] = m[1] + o.s;
+      return L.join("\n");
+    }
+
+    case "delCmt": {
+      const m = (L[o.ln] || "").match(/^(\s{2,}- )(.*)$/);
+      if (!m || m[2] !== o.prev) return text;
+      L.splice(o.ln, 1);
       return L.join("\n");
     }
 
@@ -753,11 +771,15 @@ function editRow(initial, on){
   r1.append(i,b);
 
   const r2 = el("div","editbar");
-  const up = el("button","movebtn"); up.textContent = "↑ 위로";   up.disabled = !on.canUp;   up.onclick = () => on.move(-1);
-  const dn = el("button","movebtn"); dn.textContent = "↓ 아래로"; dn.disabled = !on.canDown; dn.onclick = () => on.move(1);
-  const x  = el("button","delbtn");  x.textContent = "삭제"; x.title = "코멘트까지 지웁니다";
+  if (on.move){                                        // 코멘트처럼 옮길 자리가 없으면 안 보인다
+    const up = el("button","movebtn"); up.textContent = "↑ 위로";   up.disabled = !on.canUp;   up.onclick = () => on.move(-1);
+    const dn = el("button","movebtn"); dn.textContent = "↓ 아래로"; dn.disabled = !on.canDown; dn.onclick = () => on.move(1);
+    r2.append(up, dn);
+  }
+  const x = el("button","delbtn"); x.textContent = "삭제";
+  x.title = on.delTitle || "지웁니다";
   x.onclick = on.del;                                  // 확인창 없이
-  r2.append(up, dn, el("span","spacer"), x);
+  r2.append(el("span","spacer"), x);
 
   w.append(r1, r2);
   // 열 때만 포커스를 준다. 순서를 바꿀 때마다 키보드가 올라오면 성가시다.
@@ -918,7 +940,27 @@ function card(d,t){
 
     if (b.cmts.length){
       const ul = el("ul","cmts");
-      for (const cm of b.cmts){ const x = el("li"); x.textContent = cm; ul.appendChild(x); }
+      for (const cm of b.cmts){
+        const x = el("li");
+        const ckey = path+"::cmt::"+cm.ln;
+        const row = el("div","cmtrow");
+        const tt = el("span","cmttx"); tt.textContent = cm.text;
+        const cb = el("button","addc editb"); cb.textContent = "⋯";
+        cb.title = "코멘트 수정·삭제"; cb.setAttribute("aria-label", "코멘트 수정");
+        cb.onclick = () => {
+          const open = S.open !== ckey;
+          S.open = open ? ckey : null;
+          S.focusEdit = open;
+          render();
+        };
+        row.append(tt, cb); x.appendChild(row);
+        if (S.open === ckey)
+          x.appendChild(editRow(cm.text, {
+            save: v => { S.open=null; mutate(path, {k:"editCmt", ln:cm.ln, prev:cm.text, s:v}, `edit note ${d} ${t}`); },
+            del: () => { S.open=null; mutate(path, {k:"delCmt", ln:cm.ln, prev:cm.text}, `drop note ${d} ${t}`); },
+          }));
+        ul.appendChild(x);
+      }
       li.appendChild(ul);
     }
     if (S.open === path+"::"+b.ln)
@@ -932,6 +974,7 @@ function card(d,t){
       li.appendChild(editRow(b.text, {
         canUp:   !!mate(-1),
         canDown: !!mate(1),
+        delTitle: "코멘트까지 지웁니다",
         save: v => { S.open=null; mutate(path, {k:"edit", ln:b.ln, prev:b.text, s:v}, `edit ${d} ${t}`); },
         del: () => { S.open=null; mutate(path, {k:"del",  ln:b.ln, prev:b.text},     `drop ${d} ${t}`); },
         move: dir => {                                   // 옮긴 뒤에도 편집창은 그 항목을 따라간다
@@ -949,12 +992,18 @@ function card(d,t){
     return li;
   };
 
-  // 메모 문단 하나
-  const noteBlk = b => {
+  // 메모는 통으로 고친다. 이어지는 문단을 한 덩어리로 묶어
+  // 파일에 적힌 그대로(빈 줄 포함) textarea에 올린다.
+  const noteBlk = ps => {
+    const lines = rec.text.split("\n");
+    const ln = ps[0].ln, end = ps[ps.length-1].end;
+    const raw = lines.slice(ln, end).join("\n");
+    const nkey = path+"::note::"+ln;
+
     const wrap = el("div","noteblk");
-    const nkey = path+"::note::"+b.ln;
     const row = el("div","noterow");
-    const p = el("p","note"); p.textContent = b.text;
+    const body = el("div","notebody");
+    for (const p of ps){ const e = el("p","note"); e.textContent = p.text; body.appendChild(e); }
     const eb = el("button","addc editb"); eb.textContent = "⋯";
     eb.title = "메모 수정·삭제"; eb.setAttribute("aria-label", "메모 수정");
     eb.onclick = () => {
@@ -963,12 +1012,12 @@ function card(d,t){
       S.focusEdit = open;
       render();
     };
-    row.append(p, eb);
+    row.append(body, eb);
     wrap.appendChild(row);
     if (S.open === nkey)
-      wrap.appendChild(noteEdit(b.text, {
-        save: v => { S.open=null; mutate(path, {k:"editNote", ln:b.ln, end:b.end, prev:b.text, s:v}, `memo ${d} ${t}`); },
-        del: () => { S.open=null; mutate(path, {k:"delNote", ln:b.ln, end:b.end, prev:b.text}, `drop memo ${d} ${t}`); },
+      wrap.appendChild(noteEdit(raw, {
+        save: v => { S.open=null; mutate(path, {k:"editNote", ln, end, prev:raw, s:v}, `memo ${d} ${t}`); },
+        del: () => { S.open=null; mutate(path, {k:"delNote", ln, end, prev:raw}, `drop memo ${d} ${t}`); },
       }));
     return wrap;
   };
@@ -988,6 +1037,15 @@ function card(d,t){
     const sect = el("div","sect");
     if (s.title){ const h = el("h3"); h.textContent = s.title; sect.appendChild(h); }
 
+    // 이어지는 항목끼리, 이어지는 문단끼리 한 묶음으로
+    const parts = [];
+    for (const b of s.blocks){
+      const last = parts[parts.length-1];
+      const key = b.kind === "p" ? "ps" : "items";
+      if (last && last[key]) last[key].push(b);
+      else parts.push({ [key]:[b] });
+    }
+
     const items = s.blocks.filter(b => b.kind === "item");
     const timed = TIMED.has(t)
       ? items.map((b,i) => ({ b, i, tm: itemTime(b.text) })).filter(x => x.tm)
@@ -1006,17 +1064,10 @@ function card(d,t){
       timed.sort((a,b) => a.tm.mins - b.tm.mins || a.i - b.i);
       for (const x of timed) ul2.appendChild(itemLi(x.b, x.tm, null, 0));
       sect.appendChild(ul2);
-      for (const b of s.blocks) if (b.kind === "p") sect.appendChild(noteBlk(b));
+      for (const part of parts) if (part.ps) sect.appendChild(noteBlk(part.ps));
     } else {                                             // 파일에 적힌 순서 그대로
-      const parts = [];                                  // 이어지는 항목은 한 묶음으로 모아둔다
-      for (const b of s.blocks){
-        const last = parts[parts.length-1];
-        if (b.kind === "p") parts.push({ p:b });
-        else if (last && last.items) last.items.push(b);
-        else parts.push({ items:[b] });
-      }
       for (const part of parts){
-        if (part.p){ sect.appendChild(noteBlk(part.p)); continue; }
+        if (part.ps){ sect.appendChild(noteBlk(part.ps)); continue; }
         const ul = el("ul","items");
         part.items.forEach((b,i) => ul.appendChild(itemLi(b, null, part.items, i)));
         sect.appendChild(ul);
