@@ -871,7 +871,7 @@ function inlineMd(node, s){
 const tRow = l => /^\s*\|.*\|\s*$/.test(l);
 const tSep = l => /^\s*\|[\s:|-]+\|\s*$/.test(l);
 const tCells = l => l.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
-const isBullet = l => /^\s*[-*·]\s+/.test(l);
+const isBullet = l => /^\s*[-*]\s+/.test(l);   // 가운뎃점은 문장 구분자로도 쓰여 제외
 
 function renderMd(host, text){
   const L = text.split("\n");
@@ -925,8 +925,12 @@ function renderMd(host, text){
     if (isBullet(l)){                                                // 목록
       flush();
       const ul = el("ul","mdlist");
-      while (i < L.length && isBullet(L[i]))
-        ul.appendChild(inlineMd(el("li"), L[i++].replace(/^\s*[-*·]\s+/, "")));
+      while (i < L.length && isBullet(L[i])){
+        const item = [L[i++].replace(/^\s*[-*]\s+/, "")];
+        // 들여쓴 다음 줄은 같은 항목이 이어지는 것이다
+        while (i < L.length && /^\s+\S/.test(L[i]) && !isBullet(L[i])) item.push(L[i++].trim());
+        ul.appendChild(inlineMd(el("li"), item.join(" ")));
+      }
       host.appendChild(ul);
       continue;
     }
