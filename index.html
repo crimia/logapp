@@ -163,7 +163,16 @@
   ul.tlist{list-style:none;margin:0 0 10px;padding:0}
   ul.tlist li{display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--rule-soft)}
   ul.tlist .movebtn{min-width:28px;padding:4px 6px;text-align:center}
-  ul.tlist .sw{flex:0 0 auto;width:9px;height:9px;border-radius:1px;background:currentColor}
+  /* 버튼은 color를 물려받지 않는다. 그대로 두면 currentColor가 검정이 된다. */
+  ul.tlist .sw{flex:0 0 auto;width:15px;height:15px;border-radius:3px;
+               color:inherit;background:currentColor;border:0;padding:0;cursor:pointer}
+  ul.tlist .sw:hover{outline:2px solid var(--rule);outline-offset:2px}
+  ul.tlist li.swatches{display:flex;gap:7px;flex-wrap:wrap;padding:2px 0 9px 21px;border-top:0}
+  .chip{width:27px;height:27px;border-radius:4px;border:1px solid var(--rule-soft);
+        cursor:pointer;padding:0;font:inherit;font-size:10.5px;color:var(--muted);
+        background:var(--surface)}
+  .chip.on{outline:2px solid var(--ink);outline-offset:2px}
+  .chip:hover{border-color:var(--ink)}
   ul.tlist .nm{flex:1;font-size:14px;color:var(--ink)}
   ul.tlist .none{font-size:13px;color:var(--muted)}
   .hidebtn{font:inherit;font-size:11.5px;color:var(--muted);background:none;border:0;
@@ -292,7 +301,7 @@ const S = {
   view:"date", ym:TODAY.slice(0,7), date:TODAY, topic:null,
   topics:[], store:{}, present:new Set(),
   open:null, status:"", err:false, loading:true,
-  exportOpen:false, topicsOpen:false, topicMsg:"", focusEdit:false,
+  exportOpen:false, topicsOpen:false, topicMsg:"", focusEdit:false, tcolors:{},
 };
 const DOW  = ["일","월","화","수","목","금","토"];
 const dow  = d => DOW[new Date(d+"T00:00:00").getDay()];
@@ -302,7 +311,10 @@ const cellName = (d,t) => `${d}__${nfc(t)}`;
 const TOPICS_PATH = "topics.json";
 const DEFAULT_TOPICS = ["일정","운세","운동"];
 const daysIn = ym => new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
-const tcolor = t => `var(--c${S.topics.indexOf(t) % 6})`;
+// 정해둔 색이 있으면 그것, 없으면 차례대로
+const tcolor = t => S.tcolors[t] || `var(--c${S.topics.indexOf(t) % 6})`;
+const PALETTE = () => [0,1,2,3,4,5].map(i =>
+  getComputedStyle(document.documentElement).getPropertyValue(`--c${i}`).trim());
 const TEMPLATE = (d,t) => `---\ndate: ${d}\ntopic: ${t}\n---\n## 계획\n- [ ] `;
 
 function setStatus(msg, err){ S.status = msg; S.err = !!err; paintStatus(); }
@@ -319,10 +331,23 @@ function paintStatus(){
 }
 
 /* ═══ 로드 ═══════════════════════════════════════════ */
-function readTopics(text){
-  try { const j = JSON.parse(text); if (Array.isArray(j)) return j.map(nfc); } catch(e){}
-  return DEFAULT_TOPICS.slice();       // 파일이 없거나 깨졌을 때만 기본값. 빈 목록은 빈 목록이다
+// topics.json의 한 칸은 이름 문자열이거나 {name, color} 객체다.
+// 문자열이면 색은 차례대로 자동 배정, 객체면 적힌 색을 쓴다.
+const okColor = c => typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c.trim());
+function readEntries(text){
+  let j;
+  try { j = JSON.parse(text); } catch(e){ j = null; }
+  if (!Array.isArray(j)) return DEFAULT_TOPICS.map(name => ({ name }));  // 없거나 깨졌을 때만 기본값
+  const out = [];
+  for (const e of j){
+    if (typeof e === "string"){ if (e.trim()) out.push({ name: nfc(e) }); }
+    else if (e && typeof e.name === "string" && e.name.trim())
+      out.push(okColor(e.color) ? { name: nfc(e.name), color: e.color.trim() } : { name: nfc(e.name) });
+  }
+  return out;
 }
+const writeEntries = a => JSON.stringify(a.map(e => e.color ? { name:e.name, color:e.color } : e.name)) + "\n";
+const readTopics = text => readEntries(text).map(e => e.name);
 async function loadTopics(){
   const f = await ghRead(TOPICS_PATH);
   S.store[TOPICS_PATH] = { text: f ? f.text : "", sha: f ? f.sha : null };
@@ -332,7 +357,10 @@ async function loadTopics(){
 function syncTopics(){
   const rec = S.store[TOPICS_PATH];
   if (!rec) return;
-  S.topics = readTopics(rec.text);
+  const entries = readEntries(rec.text);
+  S.topics = entries.map(e => e.name);
+  S.tcolors = {};
+  for (const e of entries) if (e.color) S.tcolors[e.name] = e.color;
   if (!S.topic || !S.topics.includes(S.topic)) S.topic = S.topics[0] || null;
   if (S.view === "topic" && !S.topic) S.view = "date";
 }
@@ -479,18 +507,28 @@ function applyOp(o, text){
 
     case "topicAdd":                                         // topics.json만 건드린다
     case "topicHide": {                                      // 숨김 = 목록에서 빼기. md 파일은 그대로 둔다
-      let a = readTopics(text);
-      if (o.k === "topicAdd"){ if (!a.includes(o.name)) a.push(o.name); }
-      else a = a.filter(x => x !== o.name);
-      return JSON.stringify(a) + "\n";
+      let a = readEntries(text);
+      if (o.k === "topicAdd"){ if (!a.some(e => e.name === o.name)) a.push({ name:o.name }); }
+      else a = a.filter(e => e.name !== o.name);
+      return writeEntries(a);
     }
 
-    case "topicMove": {                                      // 목록 차례. 색과 줄 순서가 여기서 나온다
-      const a = readTopics(text);
-      const i = a.indexOf(o.name), j = i + o.dir;
+    case "topicMove": {                                      // 목록 차례. 줄 순서가 여기서 나온다
+      const a = readEntries(text);
+      const i = a.findIndex(e => e.name === o.name), j = i + o.dir;
       if (i < 0 || j < 0 || j >= a.length) return text;
       a.splice(j, 0, a.splice(i, 1)[0]);
-      return JSON.stringify(a) + "\n";
+      return writeEntries(a);
+    }
+
+    case "topicColor": {                                     // 색을 고정하거나 자동으로 되돌린다
+      const a = readEntries(text);
+      const e = a.find(x => x.name === o.name);
+      if (!e) return text;
+      if (o.color == null) delete e.color;                   // 자동 = 차례대로
+      else if (okColor(o.color)) e.color = o.color.trim();
+      else return text;
+      return writeEntries(a);
     }
   }
   return text;
@@ -1092,7 +1130,7 @@ function topicPanel(){
     const nm = el("span","nm"); nm.textContent = name;
     const mk = (dir, label) => {
       const b = el("button","movebtn"); b.textContent = label;
-      b.title = "차례를 바꿉니다. 색도 차례를 따라갑니다.";
+      b.title = "차례를 바꿉니다. 색을 고정하지 않았으면 색도 따라갑니다.";
       b.disabled = dir < 0 ? i === 0 : i === S.topics.length - 1;
       b.onclick = () => { S.topicMsg = ""; mutate(TOPICS_PATH, {k:"topicMove", name, dir}, `move topic ${name}`); };
       return b;
@@ -1100,8 +1138,32 @@ function topicPanel(){
     const hb = el("button","hidebtn"); hb.textContent = "숨기기";
     hb.title = "목록에서만 뺍니다. 기록은 지워지지 않습니다.";
     hb.onclick = () => { S.topicMsg = ""; mutate(TOPICS_PATH, {k:"topicHide", name}, `hide topic ${name}`); };
-    li.append(el("span","sw"), nm, mk(-1,"↑"), mk(1,"↓"), hb);
+
+    const ckey = "color::" + name;
+    const sw = el("button","sw"); sw.title = "색 고르기";
+    sw.setAttribute("aria-label", name + " 색");
+    sw.onclick = () => { S.topicMsg = ""; S.open = S.open === ckey ? null : ckey; render(); };
+    li.append(sw, nm, mk(-1,"↑"), mk(1,"↓"), hb);
     ul.appendChild(li);
+
+    if (S.open === ckey){                                  // 팔레트 한 줄
+      const fixed = S.tcolors[name] || null;
+      const row = el("li","swatches");
+      const pick = (c, on) => {
+        const b = el("button","chip" + (on ? " on" : ""));
+        if (c){ b.style.background = c; b.title = c; }
+        else { b.textContent = "자동"; b.title = "차례대로 자동 배정"; }
+        b.onclick = () => {
+          S.open = null;
+          mutate(TOPICS_PATH, {k:"topicColor", name, color:c}, `color topic ${name}`);
+        };
+        return b;
+      };
+      row.appendChild(pick(null, !fixed));
+      for (const c of PALETTE())
+        row.appendChild(pick(c, !!fixed && fixed.toLowerCase() === c.toLowerCase()));
+      ul.appendChild(row);
+    }
   });
   if (!S.topics.length){
     const li = el("li"); const s = el("span","none");
@@ -1127,7 +1189,7 @@ function topicPanel(){
 
   if (S.topicMsg){ const m = el("p","pnote warn"); m.textContent = S.topicMsg; p.appendChild(m); }
   const n = el("p","pnote");
-  n.textContent = "숨기기는 topics.json에서 이름만 뺍니다. 이미 쓴 기록 파일은 그대로 남고, 같은 이름을 다시 추가하면 다시 보입니다. 색은 순서대로 자동 배정됩니다.";
+  n.textContent = "숨기기는 topics.json에서 이름만 뺍니다. 이미 쓴 기록 파일은 그대로 남고, 같은 이름을 다시 추가하면 다시 보입니다. 색 네모를 누르면 색을 고정할 수 있고, 자동으로 두면 차례대로 배정됩니다.";
   p.appendChild(n);
   return p;
 }
