@@ -300,7 +300,7 @@ const nfc  = s => s.normalize("NFC");
 const cellPath = (d,t) => `${LOGDIR}/${d.slice(0,7)}/${d}__${nfc(t)}.md`;
 const cellName = (d,t) => `${d}__${nfc(t)}`;
 const TOPICS_PATH = "topics.json";
-const DEFAULT_TOPICS = ["운동","스케쥴","사주"];
+const DEFAULT_TOPICS = ["일정","운세","운동"];
 const daysIn = ym => new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
 const tcolor = t => `var(--c${S.topics.indexOf(t) % 6})`;
 const TEMPLATE = (d,t) => `---\ndate: ${d}\ntopic: ${t}\n---\n## 계획\n- [ ] `;
@@ -770,7 +770,7 @@ function attachSwipe(node, go){
 }
 
 // 시간이 앞에 붙은 항목을 시간별로 갈라 보여줄 주제. 이름 하나만 바꾸면 된다.
-const TIMED = new Set(["스케쥴"]);
+const TIMED = new Set(["일정"]);
 const TIME_RE = /^(\d{1,2}):(\d{2})(?:\s*[~\-–]\s*\d{1,2}:\d{2})?\s+(.+)$/;
 function itemTime(s){
   const m = s.match(TIME_RE);
@@ -889,7 +889,7 @@ function card(d,t){
       }));
     if (S.open === ekey){
       // 파일 순서가 아니라 화면에 보이는 차례로 바꾼다.
-      // 스케쥴처럼 갈라 보여줄 때 file 이웃과 화면 이웃이 다르기 때문이다.
+      // 일정처럼 갈라 보여줄 때 file 이웃과 화면 이웃이 다르기 때문이다.
       const mate = dir => (tm ? null : sib[i + dir]);       // 시간순 항목은 옮길 자리가 없다
       li.appendChild(editRow(b.text, {
         canUp:   !!mate(-1),
