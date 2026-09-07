@@ -31,6 +31,7 @@
   .status.err{color:#a33}
   .gear{font:inherit;font-size:14px;background:none;border:0;color:var(--muted);cursor:pointer;padding:0 2px}
   .gear:hover{color:var(--ink)}
+  .gear.on{color:var(--ink)}
 
   .grid-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;padding-bottom:8px}
   .grid-scroll::-webkit-scrollbar{height:0}
@@ -140,6 +141,9 @@
                  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
   .additem{font:inherit;font-size:12.5px;color:var(--muted);background:none;border:0;
            padding:4px 0 0 24px;cursor:pointer}
+  .todowrap{padding:0 0 90px}
+  .todowrap .grouplab{margin:14px 0 5px}
+  .todowrap .additem{padding-left:0}
   .additem:hover{color:var(--ink)}
 
   pre.raw{margin:9px 0 0;padding:10px;background:#f6f8f9;border:1px solid var(--rule-soft);
@@ -328,6 +332,8 @@ const nfc  = s => s.normalize("NFC");
 const cellPath = (d,t) => `${LOGDIR}/${d.slice(0,7)}/${d}__${nfc(t)}.md`;
 const cellName = (d,t) => `${d}__${nfc(t)}`;
 const TOPICS_PATH = "topics.json";
+const TODOS_PATH = "todos.md";
+const TODO_HIDE_DAYS = 3;   // 완료 후 이 날수가 지나면 목록에서 빠진다 (파일에는 남는다)
 const DEFAULT_TOPICS = ["일정","운세","운동"];
 const daysIn = ym => new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate();
 // 정해둔 색이 있으면 그것, 없으면 차례대로
@@ -371,6 +377,10 @@ async function loadTopics(){
   const f = await ghRead(TOPICS_PATH);
   S.store[TOPICS_PATH] = { text: f ? f.text : "", sha: f ? f.sha : null };
   return readTopics(f ? f.text : "");
+}
+async function loadTodos(){                                  // 날짜에 안 매인 파일 하나
+  const f = await ghRead(TODOS_PATH);
+  S.store[TODOS_PATH] = { text: f ? f.text : "", sha: f ? f.sha : null };
 }
 // topics.json이 바뀌면 화면 목록도 따라간다. 색은 여전히 순서대로다.
 function syncTopics(){
@@ -441,6 +451,31 @@ function findItemLine(text, s, hint){
     if (isItem(L[i]) && itemText(L[i]) === s && (best < 0 || Math.abs(i-hint) < Math.abs(best-hint))) best = i;
   return best;
 }
+
+// 할일 한 줄. 등록·완료일은 <!-- --> 안에 숨긴다. 평소 화면에는 안 보인다.
+const TODO_RE = /^- \[([ xX])\]\s?(.*)$/;
+const TODO_META_RE = /\s*<!--\s*(.*?)\s*-->\s*$/;
+function parseTodoLine(line, ln){
+  const m = TODO_RE.exec(line || "");
+  if (!m) return null;
+  let body = m[2], meta = {};
+  const mm = TODO_META_RE.exec(body);
+  if (mm){
+    body = body.slice(0, mm.index);
+    for (const part of mm[1].split(/\s+/))
+      { const kv = part.match(/^(등록|완료):(\d{4}-\d{2}-\d{2})$/); if (kv) meta[kv[1]] = kv[2]; }
+  }
+  return { ln, done: m[1].toLowerCase()==="x", text: body.trimEnd(), meta };
+}
+const buildTodoLine = (done, text, meta) => {
+  const tags = [];
+  if (meta.등록) tags.push("등록:" + meta.등록);
+  if (meta.완료) tags.push("완료:" + meta.완료);
+  return `- [${done?"x":" "}] ${text}` + (tags.length ? ` <!-- ${tags.join(" ")} -->` : "");
+};
+const daysSince = (from, to) => Math.round((new Date(to+"T00:00:00") - new Date(from+"T00:00:00")) / 86400000);
+// 완료일을 모르면(손으로 지운 경우 등) 안전하게 계속 보여준다
+const todoVisible = p => !p.done || !p.meta.완료 || daysSince(p.meta.완료, TODAY) < TODO_HIDE_DAYS;
 
 function applyOp(o, text){
   const L = text.split("\n");
@@ -535,6 +570,37 @@ function applyOp(o, text){
       while (end < L.length && !/^##\s+/.test(L[end])) end++;
       while (end > at + 1 && !L[end-1].trim()) end--;         // 섹션 끝의 빈 줄 앞에
       L.splice(end, 0, ...(end > at + 1 ? [""] : []), ...o.s.split("\n"));
+      return L.join("\n");
+    }
+
+    case "todoAdd": {                                        // 파일 끝에 새 할일을 붙인다
+      let end = L.length;
+      while (end > 0 && !L[end-1].trim()) end--;
+      L.length = end;
+      L.push(buildTodoLine(false, o.s, { 등록: o.d }));
+      return L.join("\n") + "\n";
+    }
+
+    case "todoToggle": {                                     // 체크할 때만 완료일을 찍는다
+      const p = parseTodoLine(L[o.ln], o.ln);
+      if (!p || p.text !== o.prev) return text;
+      const meta = { ...p.meta }, done = !p.done;
+      if (done) meta.완료 = o.d; else delete meta.완료;
+      L[o.ln] = buildTodoLine(done, p.text, meta);
+      return L.join("\n");
+    }
+
+    case "todoEdit": {                                       // 문구만. 등록·완료일은 그대로
+      const p = parseTodoLine(L[o.ln], o.ln);
+      if (!p || p.text !== o.prev) return text;
+      L[o.ln] = buildTodoLine(p.done, o.s, p.meta);
+      return L.join("\n");
+    }
+
+    case "todoDel": {
+      const p = parseTodoLine(L[o.ln], o.ln);
+      if (!p || p.text !== o.prev) return text;
+      L.splice(o.ln, 1);
       return L.join("\n");
     }
 
@@ -1346,6 +1412,76 @@ function topicPanel(){
   return p;
 }
 
+// 할일 항목 하나. 등록·완료일은 화면에 안 보인다.
+function todoLi(p){
+  const li = el("li","item" + (p.done ? " done" : ""));
+  const row = el("div","row");
+  const box = el("button","box" + (p.done ? " on" : ""));
+  box.innerHTML = `<svg viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2.2"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 L5 8.6 L9.5 3.6"/></svg>`;
+  box.setAttribute("aria-pressed", p.done);
+  box.onclick = () => mutate(TODOS_PATH, {k:"todoToggle", ln:p.ln, prev:p.text, d:TODAY}, `${p.done?"undo":"done"} todo`);
+
+  const tx = el("div","txt"); tx.textContent = p.text;
+  const ekey = "todos::edit::" + p.ln;
+  const eb = el("button","addc editb"); eb.textContent = "⋯"; eb.title = "수정·삭제";
+  eb.setAttribute("aria-label", "할일 수정");
+  eb.onclick = () => {
+    const open = S.open !== ekey;
+    S.open = open ? ekey : null;
+    S.focusEdit = open;
+    render();
+  };
+  row.append(box, tx, eb); li.appendChild(row);
+
+  if (S.open === ekey)
+    li.appendChild(editRow(p.text, {
+      save: v => { S.open=null; mutate(TODOS_PATH, {k:"todoEdit", ln:p.ln, prev:p.text, s:v}, "edit todo"); },
+      del:  () => { S.open=null; mutate(TODOS_PATH, {k:"todoDel",  ln:p.ln, prev:p.text},     "drop todo"); },
+    }));
+  return li;
+}
+
+// 할일 화면. 날짜에 매이지 않은 파일 하나(todos.md)를 그대로 읽는다.
+function todosView(){
+  const wrap = el("div","todowrap");
+  const rec = S.store[TODOS_PATH];
+  if (!rec){
+    const e = el("div","empty"); e.innerHTML = `<span class="msg">불러오는 중</span>`;
+    wrap.appendChild(e); return wrap;
+  }
+
+  const items = [];
+  rec.text.split("\n").forEach((line, ln) => { const p = parseTodoLine(line, ln); if (p) items.push(p); });
+  const open = items.filter(p => !p.done);
+  const doneRecent = items.filter(p => p.done && todoVisible(p));
+
+  if (open.length){
+    const ul = el("ul","items");
+    for (const p of open) ul.appendChild(todoLi(p));
+    wrap.appendChild(ul);
+  }
+  if (doneRecent.length){
+    const lb = el("div","grouplab"); lb.textContent = "최근 완료"; wrap.appendChild(lb);
+    const ul = el("ul","items");
+    for (const p of doneRecent) ul.appendChild(todoLi(p));
+    wrap.appendChild(ul);
+  }
+  if (!open.length && !doneRecent.length){
+    const e = el("div","empty"); e.innerHTML = `<span class="msg">할일이 없습니다.</span>`;
+    wrap.appendChild(e);
+  }
+
+  if (S.open === "todos::new")
+    wrap.appendChild(inputRow("할일", v => { S.open=null; mutate(TODOS_PATH, {k:"todoAdd", s:v, d:TODAY}, "add todo"); }));
+  else {
+    const ai = el("button","additem"); ai.textContent = "+ 할일";
+    ai.onclick = () => { S.open = "todos::new"; render(); };
+    wrap.appendChild(ai);
+  }
+  return wrap;
+}
+
 function render(){
   const root = document.getElementById("root");
   if (!root.querySelector(".app")){
@@ -1358,6 +1494,7 @@ function render(){
           <span class="spacer"></span>
           <span class="status" id="status"></span>
           <button class="pending" id="pending" hidden></button>
+          <button class="gear" id="todos">할일</button>
           <button class="gear" id="topics">주제</button>
           <button class="gear" id="gear">설정</button>
         </div>
@@ -1370,6 +1507,11 @@ function render(){
     document.getElementById("next").onclick = () => shiftMonth(1);
     attachSwipe(root.querySelector(".app"), k => { if (S.view === "date") shiftDate(k); });
     document.getElementById("pending").onclick = () => flushQueue();
+    document.getElementById("todos").onclick = () => {
+      S.view = S.view === "todos" ? "date" : "todos";
+      S.open = null;
+      render();
+    };
     document.getElementById("topics").onclick = () => {
       S.topicsOpen = !S.topicsOpen; S.topicMsg = "";
       if (S.topicsOpen) window.scrollTo({ top:0 });
@@ -1383,6 +1525,7 @@ function render(){
 
   syncTopics();
   document.getElementById("monthLbl").textContent = `${+S.ym.slice(5)}월`;
+  document.getElementById("todos").classList.toggle("on", S.view === "todos");
   paintStatus();
   drawGrid(document.getElementById("grid"));
 
@@ -1401,6 +1544,9 @@ function render(){
       e.innerHTML = `<span class="msg">주제가 없습니다. 위 ‘주제’에서 추가하세요.</span>`;
       st.appendChild(e);
     }
+  } else if (S.view === "todos"){
+    vh.innerHTML = `<h2>할일</h2>`;
+    st.appendChild(todosView());
   } else {
     vh.innerHTML = `<h2>${S.topic}</h2><span class="sub">${+S.ym.slice(5)}월</span>`;
     const N = daysIn(S.ym);
@@ -1426,15 +1572,17 @@ function render(){
       window.scrollTo({ top: a.getBoundingClientRect().top + window.scrollY - 118 }));
   }
 
-  vh.appendChild(el("span","spacer"));
-  const xb = el("button","plainbtn");
-  xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
-  xb.onclick = () => {
-    S.exportOpen = !S.exportOpen;
-    if (S.exportOpen) window.scrollTo({ top:0 });
-    render();
-  };
-  vh.appendChild(xb);
+  if (S.view !== "todos"){
+    vh.appendChild(el("span","spacer"));
+    const xb = el("button","plainbtn");
+    xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
+    xb.onclick = () => {
+      S.exportOpen = !S.exportOpen;
+      if (S.exportOpen) window.scrollTo({ top:0 });
+      render();
+    };
+    vh.appendChild(xb);
+  }
 
   const sc = document.getElementById("gridScroll");
   const sel = sc.querySelector(".dayhead.sel") || sc.querySelector(".dayhead.is-today");
@@ -1511,6 +1659,7 @@ async function boot(){
   try {
     S.topics = await loadTopics();
     S.topic  = S.topics[0];
+    await loadTodos();
     render();
     await flushQueue();              // 지난번에 못 보낸 편집부터
     await loadMonth(S.ym);
