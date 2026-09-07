@@ -141,9 +141,6 @@
                  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:3px}
   .additem{font:inherit;font-size:12.5px;color:var(--muted);background:none;border:0;
            padding:4px 0 0 24px;cursor:pointer}
-  .todowrap{padding:0 0 90px}
-  .todowrap .grouplab{margin:14px 0 5px}
-  .todowrap .additem{padding-left:0}
   .additem:hover{color:var(--ink)}
 
   pre.raw{margin:9px 0 0;padding:10px;background:#f6f8f9;border:1px solid var(--rule-soft);
@@ -1442,13 +1439,19 @@ function todoLi(p){
   return li;
 }
 
-// 할일 화면. 날짜에 매이지 않은 파일 하나(todos.md)를 그대로 읽는다.
-function todosView(){
-  const wrap = el("div","todowrap");
+// 할일 카드. 탭을 옮길 필요 없이 날짜뷰든 주제뷰든 스택 맨 위에 항상 뜬다.
+// 날짜에 매이지 않은 파일 하나(todos.md)를 그대로 읽는다.
+function todosCard(){
+  const c = el("div","card todocard");
+  const top = el("div","card-top");
+  const nm = el("span","card-name"); nm.textContent = "할일";
+  top.append(nm, el("span","spacer"));
+  c.appendChild(top);
+
   const rec = S.store[TODOS_PATH];
   if (!rec){
-    const e = el("div","empty"); e.innerHTML = `<span class="msg">불러오는 중</span>`;
-    wrap.appendChild(e); return wrap;
+    const ai = el("button","additem"); ai.textContent = "불러오는 중"; ai.disabled = true;
+    c.appendChild(ai); return c;
   }
 
   const items = [];
@@ -1459,27 +1462,23 @@ function todosView(){
   if (open.length){
     const ul = el("ul","items");
     for (const p of open) ul.appendChild(todoLi(p));
-    wrap.appendChild(ul);
+    c.appendChild(ul);
   }
   if (doneRecent.length){
-    const lb = el("div","grouplab"); lb.textContent = "최근 완료"; wrap.appendChild(lb);
+    const lb = el("div","grouplab"); lb.textContent = "최근 완료"; c.appendChild(lb);
     const ul = el("ul","items");
     for (const p of doneRecent) ul.appendChild(todoLi(p));
-    wrap.appendChild(ul);
-  }
-  if (!open.length && !doneRecent.length){
-    const e = el("div","empty"); e.innerHTML = `<span class="msg">할일이 없습니다.</span>`;
-    wrap.appendChild(e);
+    c.appendChild(ul);
   }
 
   if (S.open === "todos::new")
-    wrap.appendChild(inputRow("할일", v => { S.open=null; mutate(TODOS_PATH, {k:"todoAdd", s:v, d:TODAY}, "add todo"); }));
+    c.appendChild(inputRow("할일", v => { S.open=null; mutate(TODOS_PATH, {k:"todoAdd", s:v, d:TODAY}, "add todo"); }));
   else {
     const ai = el("button","additem"); ai.textContent = "+ 할일";
     ai.onclick = () => { S.open = "todos::new"; render(); };
-    wrap.appendChild(ai);
+    c.appendChild(ai);
   }
-  return wrap;
+  return c;
 }
 
 function render(){
@@ -1494,7 +1493,6 @@ function render(){
           <span class="spacer"></span>
           <span class="status" id="status"></span>
           <button class="pending" id="pending" hidden></button>
-          <button class="gear" id="todos">할일</button>
           <button class="gear" id="topics">주제</button>
           <button class="gear" id="gear">설정</button>
         </div>
@@ -1507,11 +1505,6 @@ function render(){
     document.getElementById("next").onclick = () => shiftMonth(1);
     attachSwipe(root.querySelector(".app"), k => { if (S.view === "date") shiftDate(k); });
     document.getElementById("pending").onclick = () => flushQueue();
-    document.getElementById("todos").onclick = () => {
-      S.view = S.view === "todos" ? "date" : "todos";
-      S.open = null;
-      render();
-    };
     document.getElementById("topics").onclick = () => {
       S.topicsOpen = !S.topicsOpen; S.topicMsg = "";
       if (S.topicsOpen) window.scrollTo({ top:0 });
@@ -1525,12 +1518,12 @@ function render(){
 
   syncTopics();
   document.getElementById("monthLbl").textContent = `${+S.ym.slice(5)}월`;
-  document.getElementById("todos").classList.toggle("on", S.view === "todos");
   paintStatus();
   drawGrid(document.getElementById("grid"));
 
   const vh = document.getElementById("viewhead"), st = document.getElementById("stack");
   vh.innerHTML = ""; st.innerHTML = "";
+  st.appendChild(todosCard());               // 탭 없이 어느 화면에서든 맨 위에 뜬다
   if (S.topicsOpen) st.appendChild(topicPanel());
   if (S.exportOpen) st.appendChild(exportPanel());
 
@@ -1544,9 +1537,6 @@ function render(){
       e.innerHTML = `<span class="msg">주제가 없습니다. 위 ‘주제’에서 추가하세요.</span>`;
       st.appendChild(e);
     }
-  } else if (S.view === "todos"){
-    vh.innerHTML = `<h2>할일</h2>`;
-    st.appendChild(todosView());
   } else {
     vh.innerHTML = `<h2>${S.topic}</h2><span class="sub">${+S.ym.slice(5)}월</span>`;
     const N = daysIn(S.ym);
@@ -1572,17 +1562,15 @@ function render(){
       window.scrollTo({ top: a.getBoundingClientRect().top + window.scrollY - 118 }));
   }
 
-  if (S.view !== "todos"){
-    vh.appendChild(el("span","spacer"));
-    const xb = el("button","plainbtn");
-    xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
-    xb.onclick = () => {
-      S.exportOpen = !S.exportOpen;
-      if (S.exportOpen) window.scrollTo({ top:0 });
-      render();
-    };
-    vh.appendChild(xb);
-  }
+  vh.appendChild(el("span","spacer"));
+  const xb = el("button","plainbtn");
+  xb.textContent = S.exportOpen ? "내보내기 닫기" : "내보내기";
+  xb.onclick = () => {
+    S.exportOpen = !S.exportOpen;
+    if (S.exportOpen) window.scrollTo({ top:0 });
+    render();
+  };
+  vh.appendChild(xb);
 
   const sc = document.getElementById("gridScroll");
   const sel = sc.querySelector(".dayhead.sel") || sc.querySelector(".dayhead.is-today");
