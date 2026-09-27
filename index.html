@@ -93,7 +93,7 @@
   ul.mdlist{list-style:none;margin:6px 0;padding:0}
   ul.mdlist li{position:relative;padding-left:13px;font-size:14px;line-height:1.55}
   ul.mdlist li::before{content:"·";position:absolute;left:3px;color:var(--muted)}
-  .mdtablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:9px 0}
+  .mdtablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y pinch-zoom;margin:9px 0}
   table.mdtable{border-collapse:collapse;font-family:var(--mono);font-size:12px;
                 white-space:nowrap;font-variant-numeric:tabular-nums}
   table.mdtable th,table.mdtable td{border:1px solid var(--rule-soft);padding:4px 8px;text-align:right}
@@ -876,6 +876,9 @@ function attachSwipe(node, go){
   let x = 0, y = 0, t = 0, on = false;
   const start = (cx, cy, target) => {
     on = !(target.closest && target.closest(".grid-scroll, input, textarea, button, pre"));
+    // 가로로 넘치는 표 위에서 시작한 제스처는 표를 미는 것이다. 날짜를 넘기지 않는다.
+    const tw = on && target.closest && target.closest(".mdtablewrap");
+    if (tw && tw.scrollWidth > tw.clientWidth + 1) on = false;
     x = cx; y = cy; t = Date.now();
   };
   const end = (cx, cy) => {
